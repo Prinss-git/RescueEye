@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply h-full bg-navy text-white font-sans;
+    min-width: 1280px;
+  }
+
+  * {
+    @apply box-border;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-panel;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-cyan-dim rounded;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-panel border border-cyan/30 rounded-lg shadow-cyan;
+  }
+
+  .panel-header {
+    @apply text-xs font-mono font-bold tracking-widest text-cyan uppercase px-4 py-2 border-b border-cyan/20;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-bold tracking-wider;
+  }
+
+  .btn-primary {
+    @apply bg-cyan text-navy font-bold font-mono tracking-wider px-4 py-2 rounded hover:bg-cyan-dim transition-colors text-sm;
+  }
+
+  .btn-ghost {
+    @apply border border-cyan/40 text-cyan font-mono tracking-wider px-4 py-2 rounded hover:bg-cyan/10 transition-colors text-sm;
+  }
+
+  .input-field {
+    @apply bg-panel-light border border-cyan/30 rounded px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-cyan text-sm w-full;
+  }
+}

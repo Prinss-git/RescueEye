@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment — never commit real env files
+.env
+.env.local
+*.env.local
+frontend/.env.production
+firebase-service-account.json
+
+# Build outputs
+dist/
+build/
+.vite/
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log
+
+# Models (large binaries — use Git LFS or share separately)
+*.pt
+*.onnx
+api/models/
+
+# Video demo feeds (large files — share separately)
+api/data/*.mp4
+api/data/*.avi
+api/data/*.mkv
+
+# YOLO base weights in root
+api/yolov8n.pt
+api/yolov8n-cls.pt
+
+# Inference / run logs
+api/logs/
+*.jsonl

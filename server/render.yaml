@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: rescueeye-server
+    runtime: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://rescueeye.vercel.app
+      - key: PORT
+        value: "3001"
