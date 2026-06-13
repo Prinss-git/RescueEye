@@ -2,16 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import DetectionLog, { Detection } from '../components/DetectionLog'
 
 const API = '/api'
-const STREAM_URL    = `${API}/stream/feed`
-const STREAM_URL_2  = `${API}/stream/feed2`
 const STREAM_URL_3  = `${API}/stream/feed3`
-const STREAM_URL_4  = `${API}/stream/feed4`
 const DETECT_URL    = `${API}/detect`
 const STATUS_URL    = `${API}/stream/status`
 const MODELS_URL    = `${API}/models/status`
 
 const MAX_LOG_ENTRIES    = 30
-const DETECT_INTERVAL_MS = 1500
+
 const STATUS_POLL_MS     = 3000
 const MODEL_POLL_MS      = 10000
 
@@ -65,7 +62,6 @@ export default function Dashboard() {
   const [modelsStatus, setModelsStatus]   = useState<ModelsStatus | null>(null)
   const [canvasFlash, setCanvasFlash]     = useState(false)
   const [detectMode, setDetectMode]       = useState<'visual' | 'thermal'>('visual')
-  const [thermalFrame, setThermalFrame]   = useState<string | null>(null)
   const [forceMode, setForceMode]         = useState<'auto' | 'visual' | 'thermal'>('auto')
   const [brightness, setBrightness]       = useState<number | null>(null)
   const [latestFrame, setLatestFrame]     = useState<string | null>(null)
@@ -74,14 +70,11 @@ export default function Dashboard() {
   const imgRef2          = useRef<HTMLImageElement>(null)
   const imgRef3          = useRef<HTMLImageElement>(null)
   const imgRef4          = useRef<HTMLImageElement>(null)
-  const hiddenCanvasRef  = useRef<HTMLCanvasElement>(null)
   const overlayCanvasRef  = useRef<HTMLCanvasElement>(null)
   const overlayCanvasRef2 = useRef<HTMLCanvasElement>(null)
   const overlayCanvasRef3 = useRef<HTMLCanvasElement>(null)
   const overlayCanvasRef4 = useRef<HTMLCanvasElement>(null)
-  const activeRef        = useRef(false)
   const forceModeRef     = useRef<'auto' | 'visual' | 'thermal'>('auto')
-  const feedCycleRef     = useRef(0)
 
   // Keep forceModeRef in sync with state so runDetection closure always reads latest
   useEffect(() => { forceModeRef.current = forceMode }, [forceMode])
@@ -176,87 +169,76 @@ export default function Dashboard() {
   }, [])
 
   // ── Per-feed detection ─────────────────────────────────────────────────────
-  const runDetectionForFeed = useCallback(async (feedIdx: number) => {
-    const img    = feedImgRefs[feedIdx].current
-    const hidden = hiddenCanvasRef.current
-    if (!img || !hidden || !img.naturalWidth) return
+  // ── Detection loop — one feed at a time, in-flight guard prevents pile-up ────
+  useEffect(() => {
+    if (!detecting) return
+    let cancelled = false
+    const inFlight = [false, false, false, false]
 
-    try {
-      const capW = img.naturalWidth  || 640
-      const capH = img.naturalHeight || 480
-      if (hidden.width !== capW)  hidden.width  = capW
-      if (hidden.height !== capH) hidden.height = capH
+
+    async function runFeed(idx: number) {
+      if (inFlight[idx] || cancelled) return
+      const img = feedImgRefs[idx].current
+      if (!img || !img.naturalWidth) return
+
+      const hidden = document.createElement('canvas')
+      hidden.width  = img.naturalWidth  || 640
+      hidden.height = img.naturalHeight || 480
       const hctx = hidden.getContext('2d')
       if (!hctx) return
-      hctx.drawImage(img, 0, 0, capW, capH)
+
+      hctx.drawImage(img, 0, 0, hidden.width, hidden.height)
       const b64 = hidden.toDataURL('image/jpeg', 0.7)
 
-      const res = await fetch(DETECT_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frame: b64, force_mode: forceModeRef.current === 'auto' ? null : forceModeRef.current }),
-      })
-      if (!res.ok) return
-      const data: DetectResponse = await res.json()
+      inFlight[idx] = true
+      try {
+        const res = await fetch(DETECT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frame: b64, force_mode: forceModeRef.current === 'auto' ? null : forceModeRef.current }),
+        })
+        if (!res.ok || cancelled) return
+        const data: DetectResponse = await res.json()
 
-      // Draw overlay (no state) — do this before batched setState
-      if (data.mode === 'thermal' && feedIdx === 0) {
-        setThermalFrame(data.annotated_frame ?? null)
-      } else {
-        if (feedIdx === 0) setThermalFrame(null)
-        drawOverlayOnFeed(data.detections, capW, capH,
-          feedCanvasRefs[feedIdx] as React.RefObject<HTMLCanvasElement>,
-          feedImgRefs[feedIdx]    as React.RefObject<HTMLImageElement>)
-      }
+        drawOverlayOnFeed(data.detections, hidden.width, hidden.height,
+          feedCanvasRefs[idx] as React.RefObject<HTMLCanvasElement>,
+          feedImgRefs[idx]    as React.RefObject<HTMLImageElement>)
 
-      // Batch all state updates into one React flush
-      const newEntries: Detection[] = data.detections.length > 0
-        ? data.detections.map((d) => ({
+        setInferenceMs(data.inference_time_ms)
+        setTotalFrames((n) => n + 1)
+        if (idx === 0) {
+          if (data.mode)               setDetectMode(data.mode)
+          if (data.brightness != null) setBrightness(data.brightness)
+        }
+        if (data.detections.length > 0) {
+          if (data.annotated_frame) setLatestFrame(data.annotated_frame)
+          if (idx === 0) { setCanvasFlash(true); setTimeout(() => setCanvasFlash(false), 300) }
+          const newEntries: Detection[] = data.detections.map((d) => ({
             id:         d.id,
             class:      d.class,
             confidence: d.confidence,
             bbox:       [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h] as [number,number,number,number],
             timestamp:  new Date(d.timestamp).toLocaleTimeString('en-PH', { hour12: false }),
-            feed:       feedLabels[feedIdx],
+            feed:       feedLabels[idx],
           }))
-        : []
-
-      setInferenceMs(data.inference_time_ms)
-      setTotalFrames((n) => n + 1)
-      if (feedIdx === 0) {
-        if (data.mode)           setDetectMode(data.mode)
-        if (data.brightness != null) setBrightness(data.brightness)
+          setDetections((prev) => {
+            const next = prev.concat(newEntries)
+            return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next
+          })
+        }
+      } catch { /* ignore */ } finally {
+        inFlight[idx] = false
       }
-      if (newEntries.length > 0) {
-        if (data.annotated_frame) setLatestFrame(data.annotated_frame)
-        if (feedIdx === 0) { setCanvasFlash(true); setTimeout(() => setCanvasFlash(false), 300) }
-        setDetections((prev) => {
-          const next = prev.concat(newEntries)
-          return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next
-        })
-      }
-    } catch (err) {
-      console.error(`[detect] feed${feedIdx + 1} failed`, err)
     }
-  }, [drawOverlayOnFeed])
 
-  // ── Detection loop — cycles through all 4 feeds ────────────────────────────
-  useEffect(() => {
-    if (!detecting) {
-      activeRef.current = false
-      return
-    }
-    activeRef.current = true
+    // Cycle through feeds every 800ms — skips a feed if its request is still in-flight
     const t = setInterval(() => {
-      if (!activeRef.current) return
-      const idx = feedCycleRef.current % 4
-      feedCycleRef.current += 1
-      runDetectionForFeed(idx)
-    }, DETECT_INTERVAL_MS)
-    return () => {
-      activeRef.current = false
-      clearInterval(t)
-    }
-  }, [detecting, runDetectionForFeed])
+      if (cancelled) return
+      runFeed(2)  // feed3 only
+    }, 800)
+
+    return () => { cancelled = true; clearInterval(t) }
+  }, [detecting, drawOverlayOnFeed])
 
   function formatElapsed(s: number) {
     const m = Math.floor(s / 60)
@@ -463,38 +445,25 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Center: 2×2 feed grid */}
-        <div className="grid grid-cols-2 grid-rows-2 min-h-0 gap-2 overflow-hidden">
+        {/* Center: Feed 3 — single active feed */}
+        <div className="min-h-0 overflow-hidden">
 
-          {/* Feed 1 — primary AI detection */}
-          <div className="panel flex flex-col min-h-0 overflow-hidden">
+          <div className="panel flex flex-col h-full min-h-0 overflow-hidden">
             <div className="panel-header flex justify-between items-center flex-shrink-0 !py-1 !text-[10px]">
-              <span>FEED 1 · VISUAL</span>
-              <span className="text-white/30 normal-case font-normal">{detecting ? 'RUNNING' : 'PAUSED'}</span>
+              <span>FEED 3 · AERIAL</span>
+              <span className="text-cyan/50 normal-case font-normal">{detecting ? 'RUNNING' : 'ACTIVE'}</span>
             </div>
             <div
               className="flex-1 min-h-0 relative bg-black rounded-b overflow-hidden"
               style={canvasFlash ? { boxShadow: '0 0 0 2px #00d4ff, 0 0 12px rgba(0,212,255,0.4)' } : undefined}
             >
-              <img ref={imgRef} src={STREAM_URL} alt="feed 1" crossOrigin="anonymous"
-                className="w-full h-full object-contain"
+              <img ref={imgRef3} src={STREAM_URL_3} alt="feed 3" className="w-full h-full object-contain"
                 onLoad={() => setFeedStatus('ACTIVE')}
-                onError={() => {
-                  setFeedStatus('OFFLINE')
-                  setTimeout(() => { if (imgRef.current) { imgRef.current.src = `${STREAM_URL}?t=${Date.now()}`; setFeedStatus('CONNECTING') } }, 2000)
-                }}
+                onError={() => { const i = imgRef3.current; if (i) setTimeout(() => { i.src = `${STREAM_URL_3}?r=${Date.now()}` }, 2000) }}
               />
-              <canvas ref={overlayCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
-              {thermalFrame && (
-                <img src={thermalFrame} alt="thermal" className="absolute inset-0 w-full h-full object-contain pointer-events-none" style={{ zIndex: 10 }} />
-              )}
-              {feedStatus === 'OFFLINE' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                  <span className="font-mono text-alert text-[10px] animate-pulse">FEED LOST</span>
-                </div>
-              )}
-              <div className="absolute top-1.5 left-1.5 font-mono text-[9px] pointer-events-none flex items-center gap-1" style={{ zIndex: 20 }}>
-                {feedStatus === 'ACTIVE' && detecting ? <span className="text-alert animate-pulse">● REC</span> : <span className="text-white/30">○</span>}
+              <canvas ref={overlayCanvasRef3} className="absolute inset-0 w-full h-full pointer-events-none" />
+              <div className="absolute top-1.5 left-1.5 font-mono text-[9px] pointer-events-none flex items-center gap-1">
+                {detecting ? <span className="text-alert animate-pulse">● REC</span> : <span className="text-cyan/60">● ACTIVE</span>}
                 {detecting && (
                   <span className={`px-1 rounded text-[8px] font-bold ${detectMode === 'thermal' ? 'bg-yellow-400/20 text-yellow-300' : 'bg-cyan/10 text-cyan/70'}`}>
                     {detectMode === 'thermal' ? '🌡' : '👁'}
@@ -510,54 +479,7 @@ export default function Dashboard() {
                   <span className={brightness < 60 ? 'text-yellow-300' : 'text-white/40'}>{Math.round(brightness)}</span>
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Feed 2 */}
-          <div className="panel flex flex-col min-h-0 overflow-hidden">
-            <div className="panel-header flex justify-between items-center flex-shrink-0 !py-1 !text-[10px]">
-              <span>FEED 2 · AERIAL</span>
-              <span className="text-cyan/50 normal-case font-normal">ACTIVE</span>
-            </div>
-            <div className="flex-1 min-h-0 relative bg-black rounded-b overflow-hidden">
-              <img ref={imgRef2} src={STREAM_URL_2} alt="feed 2" className="w-full h-full object-contain"
-                onError={(e) => { const i = e.target as HTMLImageElement; setTimeout(() => { i.src = `${STREAM_URL_2}?r=${Date.now()}` }, 2000) }}
-              />
-              <canvas ref={overlayCanvasRef2} className="absolute inset-0 w-full h-full pointer-events-none" />
-              <div className="absolute top-1.5 left-1.5 font-mono text-[9px] text-cyan/60 pointer-events-none">● ACTIVE</div>
-              <div className="absolute bottom-1.5 left-1.5 font-mono text-[9px] text-white/25 pointer-events-none">CAM-2</div>
-            </div>
-          </div>
-
-          {/* Feed 3 */}
-          <div className="panel flex flex-col min-h-0 overflow-hidden">
-            <div className="panel-header flex justify-between items-center flex-shrink-0 !py-1 !text-[10px]">
-              <span>FEED 3 · AERIAL</span>
-              <span className="text-cyan/50 normal-case font-normal">ACTIVE</span>
-            </div>
-            <div className="flex-1 min-h-0 relative bg-black rounded-b overflow-hidden">
-              <img ref={imgRef3} src={STREAM_URL_3} alt="feed 3" className="w-full h-full object-contain"
-                onError={(e) => { const i = e.target as HTMLImageElement; setTimeout(() => { i.src = `${STREAM_URL_3}?r=${Date.now()}` }, 2000) }}
-              />
-              <canvas ref={overlayCanvasRef3} className="absolute inset-0 w-full h-full pointer-events-none" />
-              <div className="absolute top-1.5 left-1.5 font-mono text-[9px] text-cyan/60 pointer-events-none">● ACTIVE</div>
               <div className="absolute bottom-1.5 left-1.5 font-mono text-[9px] text-white/25 pointer-events-none">CAM-3</div>
-            </div>
-          </div>
-
-          {/* Feed 4 */}
-          <div className="panel flex flex-col min-h-0 overflow-hidden">
-            <div className="panel-header flex justify-between items-center flex-shrink-0 !py-1 !text-[10px]">
-              <span>FEED 4 · AERIAL</span>
-              <span className="text-cyan/50 normal-case font-normal">ACTIVE</span>
-            </div>
-            <div className="flex-1 min-h-0 relative bg-black rounded-b overflow-hidden">
-              <img ref={imgRef4} src={STREAM_URL_4} alt="feed 4" className="w-full h-full object-contain"
-                onError={(e) => { const i = e.target as HTMLImageElement; setTimeout(() => { i.src = `${STREAM_URL_4}?r=${Date.now()}` }, 2000) }}
-              />
-              <canvas ref={overlayCanvasRef4} className="absolute inset-0 w-full h-full pointer-events-none" />
-              <div className="absolute top-1.5 left-1.5 font-mono text-[9px] text-cyan/60 pointer-events-none">● ACTIVE</div>
-              <div className="absolute bottom-1.5 left-1.5 font-mono text-[9px] text-white/25 pointer-events-none">CAM-4</div>
             </div>
           </div>
 
@@ -578,8 +500,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Hidden capture canvas */}
-      <canvas ref={hiddenCanvasRef} className="hidden" />
+
     </div>
   )
 }
