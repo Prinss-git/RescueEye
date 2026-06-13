@@ -10,8 +10,8 @@ const DETECT_URL    = `${API}/detect`
 const STATUS_URL    = `${API}/stream/status`
 const MODELS_URL    = `${API}/models/status`
 
-const MAX_LOG_ENTRIES    = 50
-const DETECT_INTERVAL_MS = 1000
+const MAX_LOG_ENTRIES    = 30
+const DETECT_INTERVAL_MS = 1500
 const STATUS_POLL_MS     = 3000
 const MODEL_POLL_MS      = 10000
 
@@ -144,8 +144,8 @@ export default function Dashboard() {
     const scale    = Math.min(displayW / imgW, displayH / imgH)
     const offsetX  = (displayW - imgW * scale) / 2
     const offsetY  = (displayH - imgH * scale) / 2
-    canvas.width  = displayW
-    canvas.height = displayH
+    if (canvas.width !== displayW)  canvas.width  = displayW
+    if (canvas.height !== displayH) canvas.height = displayH
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, displayW, displayH)
@@ -182,11 +182,13 @@ export default function Dashboard() {
     if (!img || !hidden || !img.naturalWidth) return
 
     try {
-      hidden.width  = img.naturalWidth  || 640
-      hidden.height = img.naturalHeight || 480
+      const capW = img.naturalWidth  || 640
+      const capH = img.naturalHeight || 480
+      if (hidden.width !== capW)  hidden.width  = capW
+      if (hidden.height !== capH) hidden.height = capH
       const hctx = hidden.getContext('2d')
       if (!hctx) return
-      hctx.drawImage(img, 0, 0, hidden.width, hidden.height)
+      hctx.drawImage(img, 0, 0, capW, capH)
       const b64 = hidden.toDataURL('image/jpeg', 0.7)
 
       const res = await fetch(DETECT_URL, {
@@ -196,35 +198,41 @@ export default function Dashboard() {
       if (!res.ok) return
       const data: DetectResponse = await res.json()
 
-      setInferenceMs(data.inference_time_ms)
-      setTotalFrames((n) => n + 1)
-      if (feedIdx === 0) {
-        if (data.mode) setDetectMode(data.mode)
-        if (data.brightness != null) setBrightness(data.brightness)
-      }
-
+      // Draw overlay (no state) — do this before batched setState
       if (data.mode === 'thermal' && feedIdx === 0) {
         setThermalFrame(data.annotated_frame ?? null)
       } else {
         if (feedIdx === 0) setThermalFrame(null)
-        drawOverlayOnFeed(data.detections, hidden.width, hidden.height,
+        drawOverlayOnFeed(data.detections, capW, capH,
           feedCanvasRefs[feedIdx] as React.RefObject<HTMLCanvasElement>,
           feedImgRefs[feedIdx]    as React.RefObject<HTMLImageElement>)
       }
 
-      if (data.detections.length > 0) {
+      // Batch all state updates into one React flush
+      const newEntries: Detection[] = data.detections.length > 0
+        ? data.detections.map((d) => ({
+            id:         d.id,
+            class:      d.class,
+            confidence: d.confidence,
+            bbox:       [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h] as [number,number,number,number],
+            timestamp:  new Date(d.timestamp).toLocaleTimeString('en-PH', { hour12: false }),
+            feed:       feedLabels[feedIdx],
+          }))
+        : []
+
+      setInferenceMs(data.inference_time_ms)
+      setTotalFrames((n) => n + 1)
+      if (feedIdx === 0) {
+        if (data.mode)           setDetectMode(data.mode)
+        if (data.brightness != null) setBrightness(data.brightness)
+      }
+      if (newEntries.length > 0) {
         if (data.annotated_frame) setLatestFrame(data.annotated_frame)
         if (feedIdx === 0) { setCanvasFlash(true); setTimeout(() => setCanvasFlash(false), 300) }
-        const label = feedLabels[feedIdx]
-        const newEntries: Detection[] = data.detections.map((d) => ({
-          id:         d.id,
-          class:      d.class,
-          confidence: d.confidence,
-          bbox:       [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
-          timestamp:  new Date(d.timestamp).toLocaleTimeString('en-PH', { hour12: false }),
-          feed:       label,
-        }))
-        setDetections((prev) => [...prev, ...newEntries].slice(-MAX_LOG_ENTRIES))
+        setDetections((prev) => {
+          const next = prev.concat(newEntries)
+          return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next
+        })
       }
     } catch (err) {
       console.error(`[detect] feed${feedIdx + 1} failed`, err)
