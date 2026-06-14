@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import detect, classify, detections, detect_sse
+from routers import detect, classify, detections, detect_ws
 from routers import stream, models as models_router, logs as logs_router
 from services.yolo_model import load_all, model_info, model_status
 
@@ -59,7 +59,7 @@ app.add_middleware(
 )
 
 app.include_router(detect.router,         prefix="/detect",     tags=["detection"])
-app.include_router(detect_sse.router,     prefix="/detect",     tags=["detection"])
+app.include_router(detect_ws.router,      prefix="/detect",     tags=["detection"])
 app.include_router(classify.router,       prefix="/classify",   tags=["classification"])
 app.include_router(stream.router,         prefix="/stream",     tags=["stream"])
 app.include_router(detections.router,     prefix="/detections", tags=["detections"])
@@ -75,6 +75,6 @@ async def health():
         "version":      "0.3.0",
         "phase":        "3-custom-models",
         "models":       model_info(),
-        "stream_active": stream._stream_active,
-        "stream_source": stream._stream_source,
+        "stream_active": stream._stream_active3,
+        "stream_source": stream._stream_source3,
     }

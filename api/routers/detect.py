@@ -229,18 +229,16 @@ async def detect_objects(payload: dict = Body(...)):
         mode = "thermal" if brightness < DARK_THRESHOLD else "visual"
 
     if mode == "thermal":
-        display_frame = _apply_thermal(frame)
-    else:
-        display_frame = frame
-
-    # Run inference in thread pool — keeps the event loop free for MJPEG streaming
-    loop = asyncio.get_event_loop()
-    detections, inference_ms = await loop.run_in_executor(None, _run_victim, frame)
-
-    if mode == "thermal":
+        # Thermal/life-sensor mode: display as infrared colormap, run YOLO on
+        # original RGB (coloring is display-only), relabel detections as life_sign
+        display_frame            = _apply_thermal(frame)
+        detections, inference_ms = _run_victim(frame)
         for d in detections:
             if d["class"] == "person":
                 d["class"] = "life_sign"
+    else:
+        display_frame            = frame
+        detections, inference_ms = _run_victim(frame)
 
     frame_id  = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()
