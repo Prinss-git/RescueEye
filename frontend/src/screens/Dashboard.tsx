@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [forceMode, setForceMode]       = useState<'auto' | 'visual' | 'thermal'>('auto')
   const [brightness, setBrightness]     = useState<number | null>(null)
   const [latestFrame, setLatestFrame]   = useState<string | null>(null)
+  const [clock, setClock]               = useState('')
 
   const imgRef       = useRef<HTMLImageElement>(null)
   const canvasRef    = useRef<HTMLCanvasElement>(null)
@@ -75,37 +76,38 @@ export default function Dashboard() {
   const forceModeRef = useRef<'auto' | 'visual' | 'thermal'>('auto')
   const detectingRef = useRef(false)
 
-  // overlay state with dead-reckoning velocity per detection
   type RawDet = DetectResponse['detections'][0]
   type TrackedDet = RawDet & { vx: number; vy: number }
   type OverlayState = { dets: TrackedDet[]; imgW: number; imgH: number; ts: number } | null
-  const overlayRef     = useRef<OverlayState>(null)
-  // Per-track-ID history: last known bbox + timestamp, used for velocity
+  const overlayRef      = useRef<OverlayState>(null)
   type TrackEntry = { bbox: RawDet['bbox']; ts: number }
   const trackHistoryRef = useRef<Map<number, TrackEntry>>(new Map())
 
   useEffect(() => { forceModeRef.current = forceMode }, [forceMode])
 
-  // ── Elapsed timer ────────────────────────────────────────────────────────────
+  // Clock
+  useEffect(() => {
+    function tick() { setClock(new Date().toLocaleTimeString('en-PH', { hour12: false })) }
+    tick()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Elapsed timer
   useEffect(() => {
     const t = setInterval(() => setElapsedSec((s) => s + 1), 1000)
     return () => clearInterval(t)
   }, [])
 
-  // ── Model status poller ──────────────────────────────────────────────────────
+  // Model status poller
   useEffect(() => {
     async function poll() {
-      try {
-        const r = await fetch(MODELS_URL)
-        if (r.ok) setModelsStatus(await r.json())
-      } catch { /* API offline */ }
+      try { const r = await fetch(MODELS_URL); if (r.ok) setModelsStatus(await r.json()) } catch {}
     }
-    poll()
-    const t = setInterval(poll, MODEL_POLL_MS)
-    return () => clearInterval(t)
+    poll(); const t = setInterval(poll, MODEL_POLL_MS); return () => clearInterval(t)
   }, [])
 
-  // ── Stream status poller ─────────────────────────────────────────────────────
+  // Stream status poller
   useEffect(() => {
     async function poll() {
       try {
@@ -116,12 +118,10 @@ export default function Dashboard() {
         setStreamSource(d.source ?? '—')
       } catch { setFeedStatus('OFFLINE') }
     }
-    poll()
-    const t = setInterval(poll, STATUS_POLL_MS)
-    return () => clearInterval(t)
+    poll(); const t = setInterval(poll, STATUS_POLL_MS); return () => clearInterval(t)
   }, [])
 
-  // ── rAF canvas overlay with fade ────────────────────────────────────────────
+  // rAF canvas overlay
   useEffect(() => {
     let rafId: number
     function loop() {
@@ -149,13 +149,10 @@ export default function Dashboard() {
               ctx.translate(offsetX, offsetY)
               ctx.scale(scale, scale)
               for (const d of state.dets) {
-                // dead reckoning: extrapolate position by velocity × age (capped at 800ms)
-                // clamp velocity so a box can't travel more than 15% of image width per second
-                const maxV = state.imgW * 0.15 / 1000  // px/ms
-                const vx = Math.abs(d.vx) > maxV ? 0 : d.vx
-                const vy = Math.abs(d.vy) > maxV ? 0 : d.vy
+                const maxV  = state.imgW * 0.15 / 1000
+                const vx    = Math.abs(d.vx) > maxV ? 0 : d.vx
+                const vy    = Math.abs(d.vy) > maxV ? 0 : d.vy
                 const drift = Math.min(age, 800)
-                // clamp to image bounds so boxes never fly off screen
                 const x = Math.max(0, Math.min(state.imgW - d.bbox.w, d.bbox.x + vx * drift))
                 const y = Math.max(0, Math.min(state.imgH - d.bbox.h, d.bbox.y + vy * drift))
                 const { w, h } = d.bbox
@@ -188,7 +185,7 @@ export default function Dashboard() {
     return () => cancelAnimationFrame(rafId)
   }, [])
 
-  // ── Detection polling loop ───────────────────────────────────────────────────
+  // Detection polling loop
   useEffect(() => {
     detectingRef.current = detecting
     if (!detecting) return
@@ -217,10 +214,9 @@ export default function Dashboard() {
         if (!res.ok || !detectingRef.current) return
         const data: DetectResponse = await res.json()
 
-        // Compute velocity per track_id using persistent history map
         const now = Date.now()
         const tracked: TrackedDet[] = data.detections.map((d) => {
-          const tid = d.track_id ?? -1
+          const tid  = d.track_id ?? -1
           const prev = trackHistoryRef.current.get(tid)
           let vx = 0, vy = 0
           if (prev && tid >= 0) {
@@ -269,65 +265,110 @@ export default function Dashboard() {
     return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
   }
 
-  const statusDot  = feedStatus === 'ACTIVE' ? 'bg-green-400 animate-pulse' : feedStatus === 'CONNECTING' ? 'bg-yellow-400 animate-pulse' : 'bg-alert'
-  const statusText = feedStatus === 'ACTIVE' ? 'text-green-400' : feedStatus === 'CONNECTING' ? 'text-yellow-400' : 'text-alert'
+  const feedColor =
+    feedStatus === 'ACTIVE'     ? '#22c55e' :
+    feedStatus === 'CONNECTING' ? '#f59e0b' : '#ff3b3b'
+
+  const latColor =
+    inferenceMs == null ? '#ffffff44' :
+    inferenceMs > 2000  ? '#ff3b3b'   :
+    inferenceMs > 500   ? '#f59e0b'   : '#22c55e'
 
   return (
-    <div className="h-full flex flex-col p-2 gap-2 overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden" style={{ background: '#070b14' }}>
 
-      {/* ── Top status bar ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 panel px-3 py-1.5 flex-shrink-0 flex-wrap text-[11px]">
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${statusDot}`} />
-          <span className={`font-mono text-xs font-bold ${statusText}`}>DRONE FEED · {feedStatus}</span>
-        </div>
-        <span className="text-white/20 font-mono text-xs">|</span>
-        <span className="font-mono text-xs text-white/60">SOURCE: <span className="text-cyan uppercase">{streamSource}</span></span>
-        <span className="text-white/20 font-mono text-xs">|</span>
-        <span className="font-mono text-xs text-white/60">INCIDENT: <span className="text-cyan">TY-ODETTE-001</span></span>
-        <span className="text-white/20 font-mono text-xs">|</span>
-        <span className="font-mono text-xs text-white/60">ELAPSED: <span className="text-white">{formatElapsed(elapsedSec)}</span></span>
-        <span className="text-white/20 font-mono text-xs">|</span>
-        <span className="font-mono text-xs">
-          <span className="text-white/60">DETECTIONS: </span>
-          <span className={`font-bold ${detections.length > 0 ? 'text-alert' : 'text-white/40'}`}>{detections.length}</span>
-        </span>
-        {inferenceMs !== null && (
-          <>
-            <span className="text-white/20 font-mono text-xs">|</span>
-            <span className={`font-mono text-xs font-bold ${inferenceMs > 2000 ? 'text-alert' : inferenceMs > 1000 ? 'text-yellow-400' : 'text-green-400'}`}>
-              AI: {Math.round(inferenceMs)}ms
-            </span>
-          </>
-        )}
-        <span className="text-white/20 font-mono text-xs">|</span>
-        <span className="font-mono text-xs text-white/40">FRAMES: {totalFrames}</span>
-        {modelsStatus && (
-          <div className="ml-auto flex items-center gap-2">
-            <ModelPill label="VICTIM" info={modelsStatus.victim_model}
-              metric={modelsStatus.victim_model.map50 != null ? `mAP ${modelsStatus.victim_model.map50.toFixed(2)}` : undefined} />
-            <ModelPill label="DAMAGE" info={modelsStatus.damage_model}
-              metric={modelsStatus.damage_model.accuracy != null ? `ACC ${modelsStatus.damage_model.accuracy.toFixed(2)}` : undefined} />
+      {/* ── App header ──────────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2"
+        style={{ background: '#0d1220', borderBottom: '1px solid rgba(0,212,255,0.15)' }}>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded flex items-center justify-center"
+              style={{ background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.35)' }}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="2.5" fill="#00d4ff"/>
+                <path d="M8 1v3M8 12v3M1 8h3M12 8h3" stroke="#00d4ff" strokeWidth="1.5" strokeLinecap="round"/>
+                <path d="M3.5 3.5l2 2M10.5 10.5l2 2M10.5 3.5l-2 2M5.5 10.5l-2 2" stroke="#00d4ff44" strokeWidth="1" strokeLinecap="round"/>
+              </svg>
+            </div>
+            <div>
+              <div className="font-mono font-bold text-sm tracking-widest" style={{ color: '#00d4ff' }}>RESCUEEYE</div>
+              <div className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>AERIAL SAR INTELLIGENCE SYSTEM</div>
+            </div>
           </div>
-        )}
-        <div className={`font-mono text-xs text-white/30 ${modelsStatus ? '' : 'ml-auto'}`}>{new Date().toLocaleTimeString()}</div>
+          <div className="w-px h-8 mx-1" style={{ background: 'rgba(255,255,255,0.08)' }} />
+          <div>
+            <div className="font-mono text-[10px] font-bold tracking-wider" style={{ color: 'rgba(255,255,255,0.7)' }}>OPERATION ODETTE</div>
+            <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>CEBU PROVINCE, PHILIPPINES · SECTOR GRID 12-DELTA</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {/* Feed pill */}
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full font-mono text-xs"
+            style={{ background: 'rgba(0,0,0,0.4)', border: `1px solid ${feedColor}44` }}>
+            <span className="w-1.5 h-1.5 rounded-full"
+              style={{ background: feedColor, boxShadow: feedStatus === 'ACTIVE' ? `0 0 6px ${feedColor}` : 'none',
+                animation: feedStatus !== 'OFFLINE' ? 'pulse 2s infinite' : 'none' }} />
+            <span style={{ color: feedColor }} className="font-bold">{feedStatus}</span>
+            <span style={{ color: 'rgba(255,255,255,0.3)' }}>·</span>
+            <span style={{ color: 'rgba(255,255,255,0.5)' }} className="uppercase">{streamSource}</span>
+          </div>
+
+          {/* Metrics strip */}
+          <div className="flex items-center gap-3">
+            <Metric label="ELAPSED" value={formatElapsed(elapsedSec)} />
+            <Metric label="FRAMES"  value={String(totalFrames)} />
+            <Metric label="ALERTS"  value={String(detections.length)}
+              valueColor={detections.length > 0 ? '#ff3b3b' : undefined} />
+            {inferenceMs !== null && (
+              <Metric label="AI LAT" value={`${Math.round(inferenceMs)}ms`} valueColor={latColor} />
+            )}
+          </div>
+
+          <div className="w-px h-6" style={{ background: 'rgba(255,255,255,0.08)' }} />
+          <div className="font-mono text-sm tabular-nums" style={{ color: 'rgba(255,255,255,0.6)' }}>{clock}</div>
+        </div>
       </div>
 
-      {/* ── 3-column main layout ────────────────────────────────────────────── */}
-      <div className="flex-1 grid grid-cols-[220px_1fr_260px] gap-2 min-h-0 overflow-hidden">
+      {/* ── Model status bar ────────────────────────────────────────────────── */}
+      {modelsStatus && (
+        <div className="flex-shrink-0 flex items-center gap-3 px-4 py-1.5"
+          style={{ background: '#0a0f1c', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <span className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.2)' }}>MODELS</span>
+          <ModelChip label="VICTIM DETECT" info={modelsStatus.victim_model}
+            metric={modelsStatus.victim_model.map50 != null ? `mAP ${modelsStatus.victim_model.map50.toFixed(3)}` : undefined} />
+          <ModelChip label="DAMAGE CLASS"  info={modelsStatus.damage_model}
+            metric={modelsStatus.damage_model.accuracy != null ? `ACC ${modelsStatus.damage_model.accuracy.toFixed(3)}` : undefined} />
+          <div className="ml-auto font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            YOLO11s · ONNX-DirectML · RTX 4050
+          </div>
+        </div>
+      )}
 
-        {/* Left: controls */}
-        <div className="panel flex flex-col min-h-0">
-          <div className="panel-header">Drone Feed Source</div>
-          <div className="p-2 flex flex-col gap-2 overflow-y-auto flex-1">
-            <div className="space-y-2">
-              <button onClick={() => setDetecting((d) => !d)}
-                className={detecting ? 'btn-ghost w-full text-xs' : 'btn-primary w-full text-xs'}>
-                {detecting ? '⏹ STOP DETECTION' : '▶ START DETECTION'}
-              </button>
-              <button onClick={() => { setDetections([]); setInferenceMs(null); setTotalFrames(0) }}
-                className="btn-ghost w-full text-xs">↺ CLEAR LOG</button>
-              <button
+      {/* ── 3-column body ───────────────────────────────────────────────────── */}
+      <div className="flex-1 grid gap-2 p-2 min-h-0 overflow-hidden"
+        style={{ gridTemplateColumns: '240px 1fr 280px' }}>
+
+        {/* ── Left: controls ──────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-2 min-h-0 overflow-y-auto pr-0.5">
+
+          {/* Scan control */}
+          <SideSection title="SCAN CONTROL">
+            <button
+              onClick={() => setDetecting((d) => !d)}
+              className="w-full font-mono font-bold text-xs py-2.5 rounded transition-all tracking-widest"
+              style={detecting
+                ? { background: 'rgba(255,59,59,0.1)', border: '1px solid rgba(255,59,59,0.5)', color: '#ff3b3b' }
+                : { background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.5)', color: '#00d4ff',
+                    boxShadow: '0 0 12px rgba(0,212,255,0.15)' }}>
+              {detecting ? '■  STOP SCAN' : '▶  BEGIN SCAN'}
+            </button>
+            <div className="grid grid-cols-2 gap-1.5 mt-1">
+              <GhostBtn onClick={() => { setDetections([]); setInferenceMs(null); setTotalFrames(0) }}>
+                CLEAR LOG
+              </GhostBtn>
+              <GhostBtn
+                disabled={detections.length === 0}
                 onClick={() => {
                   if (detections.length === 0) return
                   const rows = [
@@ -337,79 +378,134 @@ export default function Dashboard() {
                   const csv = rows.map((r) => r.join(',')).join('\n')
                   const blob = new Blob([csv], { type: 'text/csv' })
                   const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `rescueeye_detections_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`
+                  const a = document.createElement('a'); a.href = url
+                  a.download = `rescueeye_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`
                   a.click(); URL.revokeObjectURL(url)
-                }}
-                disabled={detections.length === 0}
-                className="btn-ghost w-full text-xs disabled:opacity-30">↓ EXPORT CSV</button>
-
-              <div className="bg-panel-light rounded p-2 space-y-1">
-                <p className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Sensor Mode</p>
-                <div className="flex gap-1">
-                  {(['auto', 'visual', 'thermal'] as const).map((m) => (
-                    <button key={m} onClick={() => setForceMode(m)}
-                      className={`flex-1 text-[10px] font-mono font-bold py-1 rounded transition-all ${
-                        forceMode === m
-                          ? m === 'thermal' ? 'bg-yellow-400/20 text-yellow-300 border border-yellow-400/50'
-                          : m === 'visual'  ? 'bg-cyan/20 text-cyan border border-cyan/50'
-                                            : 'bg-white/10 text-white border border-white/20'
-                          : 'text-white/30 hover:text-white/60'
-                      }`}>
-                      {m === 'auto' ? 'AUTO' : m === 'visual' ? '👁' : '🌡'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                }}>
+                EXPORT CSV
+              </GhostBtn>
             </div>
+          </SideSection>
 
-            <div className="bg-panel-light rounded p-3 space-y-2">
-              {[['DRONE ID','UAV-ALPHA-01'],['ALTITUDE','120 m AGL'],['SPEED','8.4 m/s'],['BATTERY','74%'],['SIGNAL','STRONG']].map(([k,v]) => (
-                <div key={k} className="flex justify-between">
-                  <span className="font-mono text-xs text-white/50">{k}</span>
-                  <span className={`font-mono text-xs ${k==='BATTERY'||k==='SIGNAL'?'text-green-400':'text-cyan'}`}>{v}</span>
+          {/* Sensor mode */}
+          <SideSection title="SENSOR MODE">
+            <div className="grid grid-cols-3 gap-1 rounded overflow-hidden"
+              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.07)', padding: '3px' }}>
+              {(['auto', 'visual', 'thermal'] as const).map((m) => {
+                const active = forceMode === m
+                const accent = m === 'thermal' ? '#f59e0b' : m === 'visual' ? '#00d4ff' : '#ffffff'
+                return (
+                  <button key={m} onClick={() => setForceMode(m)}
+                    className="py-1.5 rounded font-mono text-[10px] font-bold tracking-widest transition-all"
+                    style={active
+                      ? { background: `${accent}18`, color: accent, border: `1px solid ${accent}55` }
+                      : { color: 'rgba(255,255,255,0.25)', border: '1px solid transparent' }}>
+                    {m === 'auto' ? 'AUTO' : m === 'visual' ? 'VISUAL' : 'THERM'}
+                  </button>
+                )
+              })}
+            </div>
+            {detecting && (
+              <div className="flex items-center gap-1.5 mt-1.5 px-2 py-1 rounded"
+                style={{ background: detectMode === 'thermal' ? 'rgba(245,158,11,0.08)' : 'rgba(0,212,255,0.06)',
+                  border: `1px solid ${detectMode === 'thermal' ? 'rgba(245,158,11,0.25)' : 'rgba(0,212,255,0.15)'}` }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{
+                  background: detectMode === 'thermal' ? '#f59e0b' : '#00d4ff',
+                  animation: 'pulse 1.5s infinite',
+                }} />
+                <span className="font-mono text-[10px] font-bold tracking-wider"
+                  style={{ color: detectMode === 'thermal' ? '#f59e0b' : '#00d4ff' }}>
+                  {detectMode === 'thermal' ? 'THERMAL ACTIVE' : 'VISUAL ACTIVE'}
+                </span>
+              </div>
+            )}
+          </SideSection>
+
+          {/* Platform telemetry */}
+          <SideSection title="PLATFORM">
+            <div className="space-y-0">
+              {([
+                ['DRONE ID',  'UAV-ALPHA-01', '#00d4ff'],
+                ['ALTITUDE',  '120 m AGL',    '#00d4ff'],
+                ['AIRSPEED',  '8.4 m/s',      '#00d4ff'],
+                ['BATTERY',   '74 %',         '#22c55e'],
+                ['SIGNAL',    'STRONG',       '#22c55e'],
+                ['GPS LOCK',  '14 SATS',      '#22c55e'],
+              ] as [string, string, string][]).map(([k, v, vc]) => (
+                <div key={k} className="flex items-center justify-between py-1.5"
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span className="font-mono text-[10px] tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>{k}</span>
+                  <span className="font-mono text-[10px] font-bold" style={{ color: vc }}>{v}</span>
                 </div>
               ))}
             </div>
+          </SideSection>
 
-            <div className="bg-panel-light rounded p-3 space-y-1">
-              <p className="font-mono text-xs text-white/50 mb-1">AI MODEL</p>
-              <div className="flex justify-between">
-                <span className="font-mono text-xs text-white/50">ENGINE</span>
-                <span className="font-mono text-xs text-cyan">{modelsStatus?.victim_model.is_custom ? 'YOLO11s · ONNX' : 'YOLO11s · pretrained'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-mono text-xs text-white/50">VERSION</span>
-                <span className="font-mono text-xs text-cyan">{modelsStatus?.victim_model.version ?? '—'}</span>
-              </div>
-              {modelsStatus?.victim_model.map50 != null && (
-                <div className="flex justify-between">
-                  <span className="font-mono text-xs text-white/50">mAP@0.5</span>
-                  <span className="font-mono text-xs text-green-400">{modelsStatus.victim_model.map50.toFixed(3)}</span>
+          {/* AI engine */}
+          <SideSection title="AI ENGINE">
+            <div className="space-y-0">
+              {([
+                ['MODEL',    modelsStatus?.victim_model.is_custom ? 'YOLO11s' : 'YOLOv8n'],
+                ['BACKEND',  modelsStatus?.victim_model.is_custom ? 'ONNX-DirectML' : 'PyTorch'],
+                ['VERSION',  modelsStatus?.victim_model.version ?? '—'],
+                ['mAP@0.5',  modelsStatus?.victim_model.map50 != null ? modelsStatus.victim_model.map50.toFixed(3) : '—'],
+                ['LATENCY',  inferenceMs != null ? `${Math.round(inferenceMs)} ms` : '—'],
+              ] as [string, string][]).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between py-1.5"
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span className="font-mono text-[10px] tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>{k}</span>
+                  <span className="font-mono text-[10px] font-bold"
+                    style={{ color: k === 'LATENCY' ? latColor : 'rgba(255,255,255,0.75)' }}>{v}</span>
                 </div>
-              )}
-              <div className="flex justify-between">
-                <span className="font-mono text-xs text-white/50">LATENCY</span>
-                <span className={`font-mono text-xs font-bold ${inferenceMs==null?'text-white/30':inferenceMs>2000?'text-alert':inferenceMs>1000?'text-yellow-400':'text-green-400'}`}>
-                  {inferenceMs != null ? `${Math.round(inferenceMs)} ms` : '—'}
-                </span>
-              </div>
+              ))}
             </div>
-          </div>
+          </SideSection>
         </div>
 
-        {/* Center: live feed with canvas overlay */}
-        <div className="panel flex flex-col min-h-0 overflow-hidden">
-          <div className="panel-header flex justify-between items-center flex-shrink-0 !py-1 !text-[10px]">
-            <span>FEED 3 · AERIAL</span>
-            <span className="text-white/30 normal-case font-normal">{detecting ? 'DETECTING' : 'PAUSED'}</span>
+        {/* ── Center: live feed ───────────────────────────────────────────── */}
+        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg"
+          style={{ border: '1px solid rgba(0,212,255,0.2)', background: '#000',
+            boxShadow: canvasFlash ? '0 0 0 2px #00d4ff, 0 0 20px rgba(0,212,255,0.35)' : '0 0 8px rgba(0,212,255,0.12)',
+            transition: 'box-shadow 0.15s' }}>
+
+          {/* Feed header */}
+          <div className="flex-shrink-0 flex items-center justify-between px-3 py-2"
+            style={{ background: 'rgba(0,0,0,0.6)', borderBottom: '1px solid rgba(0,212,255,0.12)' }}>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                FEED-3 · AERIAL
+              </span>
+              {feedStatus === 'ACTIVE' && detecting && (
+                <span className="flex items-center gap-1 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+                  style={{ background: 'rgba(255,59,59,0.15)', border: '1px solid rgba(255,59,59,0.4)', color: '#ff3b3b' }}>
+                  <span style={{ animation: 'pulse 1s infinite' }}>●</span> REC
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {brightness !== null && (
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.25)' }}>LUX</span>
+                  <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.1)' }}>
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${Math.min((brightness / 255) * 100, 100)}%`,
+                        background: brightness < 60 ? '#f59e0b' : '#22c55e' }} />
+                  </div>
+                  <span className="font-mono text-[9px] tabular-nums"
+                    style={{ color: brightness < 60 ? '#f59e0b' : 'rgba(255,255,255,0.3)' }}>
+                    {Math.round(brightness)}
+                  </span>
+                </div>
+              )}
+              <span className="font-mono text-[10px]" style={{ color: detecting ? '#22c55e' : 'rgba(255,255,255,0.2)' }}>
+                {detecting ? 'SCANNING' : 'STANDBY'}
+              </span>
+            </div>
           </div>
-          <div
-            className="flex-1 min-h-0 relative bg-black rounded-b overflow-hidden"
-            style={canvasFlash ? { boxShadow: '0 0 0 2px #00d4ff, 0 0 12px rgba(0,212,255,0.4)' } : undefined}
-          >
-            <img ref={imgRef} src={STREAM_URL_3} alt="feed 3" crossOrigin="anonymous"
+
+          {/* Video */}
+          <div className="flex-1 min-h-0 relative">
+            <img ref={imgRef} src={STREAM_URL_3} alt="aerial feed" crossOrigin="anonymous"
               className="w-full h-full object-contain"
               onLoad={() => setFeedStatus('ACTIVE')}
               onError={() => { setFeedStatus('OFFLINE'); setTimeout(() => setFeedStatus('CONNECTING'), 2000) }}
@@ -417,31 +513,44 @@ export default function Dashboard() {
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 
             {feedStatus === 'OFFLINE' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                <span className="font-mono text-alert text-[10px] animate-pulse">FEED LOST</span>
-              </div>
-            )}
-            <div className="absolute top-1.5 left-1.5 font-mono text-[9px] pointer-events-none flex items-center gap-1" style={{ zIndex: 20 }}>
-              {feedStatus === 'ACTIVE' && detecting ? <span className="text-alert animate-pulse">● REC</span> : <span className="text-white/30">○</span>}
-              {detecting && (
-                <span className={`px-1 rounded text-[8px] font-bold ${detectMode==='thermal'?'bg-yellow-400/20 text-yellow-300':'bg-cyan/10 text-cyan/70'}`}>
-                  {detectMode === 'thermal' ? '🌡' : '👁'}
-                </span>
-              )}
-            </div>
-            {brightness !== null && (
-              <div className="absolute bottom-1.5 right-1.5 font-mono text-[9px] pointer-events-none flex items-center gap-1">
-                <div className="w-10 h-1 bg-white/10 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full ${brightness<60?'bg-yellow-400':'bg-green-400'}`}
-                    style={{ width: `${Math.min((brightness/255)*100,100)}%` }} />
+              <div className="absolute inset-0 flex flex-col items-center justify-center"
+                style={{ background: 'rgba(0,0,0,0.85)' }}>
+                <div className="font-mono text-xs font-bold tracking-widest mb-1" style={{ color: '#ff3b3b' }}>
+                  FEED SIGNAL LOST
                 </div>
-                <span className={brightness<60?'text-yellow-300':'text-white/40'}>{Math.round(brightness)}</span>
+                <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  ATTEMPTING RECONNECT...
+                </div>
               </div>
             )}
+
+            {/* Corner grid overlay (decorative) */}
+            <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
+              {/* Top-left corner marks */}
+              <div className="absolute top-3 left-3 flex flex-col" style={{ gap: '2px' }}>
+                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
+                <div className="w-px h-5" style={{ background: 'rgba(0,212,255,0.4)' }} />
+              </div>
+              {/* Top-right corner marks */}
+              <div className="absolute top-3 right-3 flex flex-col items-end" style={{ gap: '2px' }}>
+                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
+                <div className="w-px h-5 self-end" style={{ background: 'rgba(0,212,255,0.4)' }} />
+              </div>
+              {/* Bottom-left */}
+              <div className="absolute bottom-3 left-3 flex flex-col-reverse" style={{ gap: '2px' }}>
+                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
+                <div className="w-px h-5" style={{ background: 'rgba(0,212,255,0.4)' }} />
+              </div>
+              {/* Bottom-right */}
+              <div className="absolute bottom-3 right-3 flex flex-col-reverse items-end" style={{ gap: '2px' }}>
+                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
+                <div className="w-px h-5 self-end" style={{ background: 'rgba(0,212,255,0.4)' }} />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Right: log + incidents */}
+        {/* ── Right: detection log + incidents ────────────────────────────── */}
         <div className="flex flex-col gap-2 min-h-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
             <DetectionLog detections={detections} latestFrame={latestFrame}
@@ -449,6 +558,7 @@ export default function Dashboard() {
           </div>
           <div className="flex-shrink-0"><IncidentPanel /></div>
         </div>
+
       </div>
 
       <canvas ref={hiddenCanvas} className="hidden" />
@@ -456,54 +566,129 @@ export default function Dashboard() {
   )
 }
 
-const INCIDENT_COLORS: Record<string, string> = {
-  VICTIM_DETECTED: 'text-alert', FIRE: 'text-orange-400',
-  FLOOD: 'text-cyan', STRUCTURAL: 'text-yellow-400', UNKNOWN: 'text-white/40',
+/* ── Helpers ────────────────────────────────────────────────────────────────── */
+
+function Metric({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="flex flex-col items-center" style={{ minWidth: '52px' }}>
+      <span className="font-mono text-[8px] tracking-widest" style={{ color: 'rgba(255,255,255,0.25)' }}>{label}</span>
+      <span className="font-mono text-xs font-bold tabular-nums" style={{ color: valueColor ?? 'rgba(255,255,255,0.7)' }}>{value}</span>
+    </div>
+  )
+}
+
+function SideSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg overflow-hidden flex-shrink-0"
+      style={{ background: '#0d1220', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="px-3 py-2 font-mono text-[9px] font-bold tracking-widest"
+        style={{ color: 'rgba(255,255,255,0.3)', background: 'rgba(0,0,0,0.2)',
+          borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        {title}
+      </div>
+      <div className="p-3">{children}</div>
+    </div>
+  )
+}
+
+function GhostBtn({ children, onClick, disabled }: {
+  children: React.ReactNode; onClick?: () => void; disabled?: boolean
+}) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className="font-mono text-[10px] font-bold tracking-widest py-1.5 rounded transition-all disabled:opacity-25"
+      style={{ border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.45)',
+        background: 'rgba(255,255,255,0.03)' }}
+      onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.8)' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.45)' }}>
+      {children}
+    </button>
+  )
+}
+
+function ModelChip({ label, info, metric }: { label: string; info: ModelInfo; metric?: string }) {
+  const ok = info.loaded && info.is_custom
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[9px]"
+      style={{ background: ok ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.06)',
+        border: `1px solid ${ok ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)'}` }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: ok ? '#22c55e' : '#f59e0b' }} />
+      <span style={{ color: 'rgba(255,255,255,0.5)' }}>{label}</span>
+      <span style={{ color: ok ? '#22c55e' : '#f59e0b' }} className="font-bold">
+        {info.is_custom ? 'CUSTOM' : 'PRETRAINED'}
+      </span>
+      {metric && <span style={{ color: 'rgba(255,255,255,0.3)' }}>· {metric}</span>}
+    </div>
+  )
+}
+
+/* ── Incident panel ─────────────────────────────────────────────────────────── */
+
+const INCIDENT_ACCENT: Record<string, string> = {
+  VICTIM_DETECTED: '#ff3b3b',
+  FIRE:            '#ff7700',
+  FLOOD:           '#00d4ff',
+  STRUCTURAL:      '#f59e0b',
+  UNKNOWN:         '#ffffff44',
 }
 
 function IncidentPanel() {
   const [incidents, setIncidents] = useState<Array<{
     id: string; type: string; severity: string; description: string; createdAt: string; status: string
   }>>([])
+
   useEffect(() => {
     async function poll() {
       try { const r = await fetch('/server/incidents'); if (r.ok) setIncidents(await r.json()) } catch {}
     }
     poll(); const t = setInterval(poll, 5000); return () => clearInterval(t)
   }, [])
+
   return (
-    <div className="panel flex flex-col overflow-hidden" style={{ maxHeight: '180px' }}>
-      <div className="panel-header flex items-center justify-between">
-        <span>Incidents</span>
-        <span className={`font-mono text-xs font-bold ${incidents.length>0?'text-alert':'text-white/30'}`}>{incidents.length}</span>
+    <div className="rounded-lg overflow-hidden flex flex-col" style={{
+      maxHeight: '200px', background: '#0d1220', border: '1px solid rgba(255,255,255,0.07)',
+    }}>
+      <div className="flex items-center justify-between px-3 py-2 flex-shrink-0"
+        style={{ background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <span className="font-mono text-[9px] font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
+          INCIDENT LOG
+        </span>
+        <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+          style={incidents.length > 0
+            ? { background: 'rgba(255,59,59,0.15)', color: '#ff3b3b', border: '1px solid rgba(255,59,59,0.3)' }
+            : { color: 'rgba(255,255,255,0.2)' }}>
+          {incidents.length} ACTIVE
+        </span>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {incidents.length === 0
-          ? <p className="text-white/30 text-xs font-mono text-center mt-4">— no incidents —</p>
-          : [...incidents].reverse().map((inc) => (
-            <div key={inc.id} className="bg-panel-light border border-white/5 rounded p-2">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className={`font-mono text-xs font-bold uppercase ${INCIDENT_COLORS[inc.type]??'text-white'}`}>{inc.type.replace('_',' ')}</span>
-                <span className={`font-mono text-[10px] px-1 rounded ${inc.severity==='HIGH'||inc.severity==='CRITICAL'?'bg-alert/20 text-alert':'bg-yellow-400/10 text-yellow-400'}`}>{inc.severity}</span>
-              </div>
-              <p className="font-mono text-[10px] text-white/50 truncate">{inc.description}</p>
-            </div>
-          ))}
+          ? <p className="font-mono text-[10px] text-center py-4" style={{ color: 'rgba(255,255,255,0.2)' }}>
+              NO ACTIVE INCIDENTS
+            </p>
+          : [...incidents].reverse().map((inc) => {
+              const accent = INCIDENT_ACCENT[inc.type] ?? '#ffffff44'
+              return (
+                <div key={inc.id} className="rounded p-2 flex flex-col gap-0.5"
+                  style={{ background: 'rgba(0,0,0,0.25)', borderLeft: `2px solid ${accent}`,
+                    border: `1px solid rgba(255,255,255,0.05)`, borderLeftColor: accent }}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[10px] font-bold tracking-wider" style={{ color: accent }}>
+                      {inc.type.replace('_', ' ')}
+                    </span>
+                    <span className="font-mono text-[9px] px-1 py-0.5 rounded font-bold"
+                      style={inc.severity === 'HIGH' || inc.severity === 'CRITICAL'
+                        ? { background: 'rgba(255,59,59,0.15)', color: '#ff3b3b' }
+                        : { background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>
+                      {inc.severity}
+                    </span>
+                  </div>
+                  <p className="font-mono text-[9px] truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    {inc.description}
+                  </p>
+                </div>
+              )
+            })}
       </div>
     </div>
-  )
-}
-
-function ModelPill({ label, info, metric }: { label: string; info: ModelInfo; metric?: string }) {
-  if (!info.loaded) return <span className="font-mono text-xs px-2 py-0.5 rounded border border-white/10 text-white/20">{label}: OFFLINE</span>
-  const isCustom = info.is_custom
-  const version  = info.version === 'custom_v1' ? 'custom_v1' : info.version === 'pretrained_coco' ? 'COCO' : info.version
-  return (
-    <span className={`font-mono text-xs px-2 py-0.5 rounded border flex items-center gap-1 ${isCustom?'bg-green-500/10 border-green-500/40 text-green-300':'bg-yellow-500/10 border-yellow-500/40 text-yellow-300'}`}
-      title={`Weights: ${info.weights}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${isCustom?'bg-green-400':'bg-yellow-400'}`} />
-      {label}: {version}
-      {metric && <span className="text-white/50 ml-1">| {metric}</span>}
-    </span>
   )
 }
