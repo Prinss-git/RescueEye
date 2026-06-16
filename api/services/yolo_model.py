@@ -70,19 +70,59 @@ def _load_meta(meta_file: Path) -> dict:
 
 
 def _load_single(weights_path: str, task: str) -> tuple[Any, bool]:
-    """
-    Load a YOLO model; returns (model, success).
-    task: 'detect' or 'classify'
-    """
+    """Load a YOLO model via Ultralytics; returns (model, success)."""
     try:
         from ultralytics import YOLO  # type: ignore
         m = YOLO(weights_path)
         dummy = np.zeros((480, 640, 3), dtype="uint8")
         m(dummy, verbose=False)
+        logger.info(f"[yolo] loaded {task} model on CPU via Ultralytics")
         return m, True
     except Exception as exc:
         logger.warning(f"[yolo] Failed to load {weights_path}: {exc}")
         return None, False
+
+
+def _dml_available() -> bool:
+    """True when onnxruntime-directml is installed and a GPU adapter is present."""
+    try:
+        import onnxruntime as ort
+        return "DmlExecutionProvider" in ort.get_available_providers()
+    except Exception:
+        return False
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
+# ── DirectML ONNX session for victim model (GPU, no PyTorch needed) ───────────
+_victim_ort_session: Any = None
+
+
+def _load_victim_ort(onnx_path: str) -> None:
+    """Load victim_best.onnx into an ONNX Runtime session using DirectML."""
+    global _victim_ort_session
+    try:
+        import onnxruntime as ort
+        providers = (["DmlExecutionProvider", "CPUExecutionProvider"]
+                     if _dml_available() else ["CPUExecutionProvider"])
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        _victim_ort_session = ort.InferenceSession(onnx_path, sess_options=opts, providers=providers)
+        active = _victim_ort_session.get_providers()[0]
+        logger.info(f"[yolo] victim ONNX session ready — provider: {active}")
+    except Exception as exc:
+        logger.warning(f"[yolo] ORT session failed: {exc}")
+        _victim_ort_session = None
+
+
+def get_victim_ort_session() -> Any:
+    return _victim_ort_session
 
 
 def _resolve_victim_weights() -> tuple[str, bool]:
@@ -137,6 +177,11 @@ def load_all() -> None:
     v_weights, v_custom = _resolve_victim_weights()
     _init_model(_victim, v_weights, v_custom,
                 meta_file=MODELS_DIR / "victim_meta.json", task="detect")
+
+    # Load GPU-accelerated ONNX session for victim model (DirectML)
+    onnx_path = str(MODELS_DIR / "victim_best.onnx")
+    if Path(onnx_path).exists():
+        _load_victim_ort(onnx_path)
 
     d_weights, d_custom = _resolve_damage_weights()
     _init_model(_damage, d_weights, d_custom,

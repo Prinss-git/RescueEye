@@ -8,7 +8,7 @@ const STATUS_URL   = `${API}/stream/status`
 const MODELS_URL   = `${API}/models/status`
 
 const MAX_LOG_ENTRIES    = 50
-const DETECT_INTERVAL_MS = 1500
+const DETECT_INTERVAL_MS = 400
 const STATUS_POLL_MS     = 3000
 const MODEL_POLL_MS      = 10000
 const BOX_FADE_MS        = 4000
@@ -20,6 +20,7 @@ interface DetectResponse {
     id:         string
     class:      string
     confidence: number
+    track_id?:  number
     bbox:       { x: number; y: number; w: number; h: number }
     timestamp:  string
   }>
@@ -74,9 +75,14 @@ export default function Dashboard() {
   const forceModeRef = useRef<'auto' | 'visual' | 'thermal'>('auto')
   const detectingRef = useRef(false)
 
-  // overlay state for rAF fade loop
-  type OverlayState = { dets: DetectResponse['detections']; imgW: number; imgH: number; ts: number } | null
-  const overlayRef = useRef<OverlayState>(null)
+  // overlay state with dead-reckoning velocity per detection
+  type RawDet = DetectResponse['detections'][0]
+  type TrackedDet = RawDet & { vx: number; vy: number }
+  type OverlayState = { dets: TrackedDet[]; imgW: number; imgH: number; ts: number } | null
+  const overlayRef     = useRef<OverlayState>(null)
+  // Per-track-ID history: last known bbox + timestamp, used for velocity
+  type TrackEntry = { bbox: RawDet['bbox']; ts: number }
+  const trackHistoryRef = useRef<Map<number, TrackEntry>>(new Map())
 
   useEffect(() => { forceModeRef.current = forceMode }, [forceMode])
 
@@ -143,7 +149,16 @@ export default function Dashboard() {
               ctx.translate(offsetX, offsetY)
               ctx.scale(scale, scale)
               for (const d of state.dets) {
-                const { x, y, w, h } = d.bbox
+                // dead reckoning: extrapolate position by velocity × age (capped at 800ms)
+                // clamp velocity so a box can't travel more than 15% of image width per second
+                const maxV = state.imgW * 0.15 / 1000  // px/ms
+                const vx = Math.abs(d.vx) > maxV ? 0 : d.vx
+                const vy = Math.abs(d.vy) > maxV ? 0 : d.vy
+                const drift = Math.min(age, 800)
+                // clamp to image bounds so boxes never fly off screen
+                const x = Math.max(0, Math.min(state.imgW - d.bbox.w, d.bbox.x + vx * drift))
+                const y = Math.max(0, Math.min(state.imgH - d.bbox.h, d.bbox.y + vy * drift))
+                const { w, h } = d.bbox
                 const color = CLASS_COLOR[d.class] ?? '#ffffff'
                 const conf  = Math.round(d.confidence * 100)
                 const label = `${d.class.toUpperCase()} ${conf}%`
@@ -202,13 +217,23 @@ export default function Dashboard() {
         if (!res.ok || !detectingRef.current) return
         const data: DetectResponse = await res.json()
 
-        // store overlay — rAF loop draws it with fade
-        overlayRef.current = {
-          dets: data.detections,
-          imgW: img.naturalWidth,
-          imgH: img.naturalHeight,
-          ts:   Date.now(),
-        }
+        // Compute velocity per track_id using persistent history map
+        const now = Date.now()
+        const tracked: TrackedDet[] = data.detections.map((d) => {
+          const tid = d.track_id ?? -1
+          const prev = trackHistoryRef.current.get(tid)
+          let vx = 0, vy = 0
+          if (prev && tid >= 0) {
+            const dt = now - prev.ts
+            if (dt > 0) {
+              vx = (d.bbox.x + d.bbox.w / 2 - (prev.bbox.x + prev.bbox.w / 2)) / dt
+              vy = (d.bbox.y + d.bbox.h / 2 - (prev.bbox.y + prev.bbox.h / 2)) / dt
+            }
+          }
+          trackHistoryRef.current.set(tid, { bbox: d.bbox, ts: now })
+          return { ...d, vx, vy }
+        })
+        overlayRef.current = { dets: tracked, imgW: img.naturalWidth, imgH: img.naturalHeight, ts: now }
 
         setInferenceMs(data.inference_time_ms)
         setTotalFrames((n) => n + 1)

@@ -24,9 +24,11 @@ from services.yolo_model import (
     DAMAGE_PROXY_CLASSES,
     PERSON_CLASS,
     get_victim_model,
+    get_victim_ort_session,
     victim_state,
 )
 from services.detection_store import add_detections
+from services.tracker import Sort
 from routers.logs import append_log
 
 logger = logging.getLogger("rescueeye.detect")
@@ -40,6 +42,9 @@ GRID_COOLDOWN_S      = 10.0
 
 _grid_cooldown: dict[tuple[int, int], float] = {}
 _grid_lock = asyncio.Lock()
+
+# SORT tracker — persists across requests, maintains Kalman state per person
+_tracker = Sort(max_age=4, min_hits=1, iou_threshold=0.20)
 
 
 def _bbox_to_grid(bbox: dict, cols: int = 8, rows: int = 6) -> tuple[int, int]:
@@ -159,10 +164,99 @@ def _annotate_frame(frame_rgb: np.ndarray, detections: list[dict]) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def _letterbox(img: np.ndarray, target: int = 1280) -> tuple[np.ndarray, float, int, int]:
+    """Resize + pad to square keeping aspect ratio. Returns (padded_rgb, scale, pad_x, pad_y)."""
+    h, w = img.shape[:2]
+    scale = target / max(h, w)
+    new_h, new_w = int(round(h * scale)), int(round(w * scale))
+    resized = np.array(Image.fromarray(img).resize((new_w, new_h), Image.BILINEAR))
+    pad = np.full((target, target, 3), 114, dtype=np.uint8)
+    pad_y = (target - new_h) // 2
+    pad_x = (target - new_w) // 2
+    pad[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+    return pad, scale, pad_x, pad_y
+
+
+def _nms(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float = 0.45) -> list[int]:
+    """Simple NMS — returns surviving indices."""
+    if len(boxes) == 0:
+        return []
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    areas = (x2 - x1) * (y2 - y1)
+    order = scores.argsort()[::-1]
+    keep: list[int] = []
+    while order.size:
+        i = order[0]
+        keep.append(int(i))
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+        inter = np.maximum(0, xx2 - xx1) * np.maximum(0, yy2 - yy1)
+        iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
+        order = order[1:][iou < iou_thresh]
+    return keep
+
+
+def _run_victim_ort(frame: np.ndarray) -> tuple[list[dict], float]:
+    """GPU inference via DirectML ONNX Runtime (bypasses PyTorch entirely)."""
+    sess = get_victim_ort_session()
+    t0   = time.perf_counter()
+
+    padded, scale, pad_x, pad_y = _letterbox(frame, 1280)
+    blob = padded.astype(np.float32) / 255.0
+    blob = blob.transpose(2, 0, 1)[np.newaxis]  # NCHW
+
+    input_name = sess.get_inputs()[0].name
+    raw = sess.run(None, {input_name: blob})[0]  # [1, 5, 33600]
+
+    preds = raw[0]          # [5, 33600]
+    cx, cy, bw, bh = preds[0], preds[1], preds[2], preds[3]
+    conf = preds[4]
+
+    mask = conf >= CONFIDENCE_THRESHOLD
+    if not mask.any():
+        elapsed = (time.perf_counter() - t0) * 1000
+        return [], round(elapsed, 1)
+
+    cx, cy, bw, bh, conf = cx[mask], cy[mask], bw[mask], bh[mask], conf[mask]
+
+    # Convert from padded-input coords → original frame coords
+    orig_x1 = ((cx - bw / 2) - pad_x) / scale
+    orig_y1 = ((cy - bh / 2) - pad_y) / scale
+    orig_x2 = ((cx + bw / 2) - pad_x) / scale
+    orig_y2 = ((cy + bh / 2) - pad_y) / scale
+
+    boxes = np.stack([orig_x1, orig_y1, orig_x2, orig_y2], axis=1)
+    keep  = _nms(boxes, conf, iou_thresh=0.30)
+
+    fh, fw = frame.shape[:2]
+    detections: list[dict] = []
+    for i in keep:
+        x1 = max(0, int(orig_x1[i]))
+        y1 = max(0, int(orig_y1[i]))
+        x2 = min(fw, int(orig_x2[i]))
+        y2 = min(fh, int(orig_y2[i]))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        detections.append({
+            "class":      "person",
+            "confidence": round(float(conf[i]), 3),
+            "bbox":       {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1},
+        })
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    return detections, round(elapsed_ms, 1)
+
+
 def _run_victim(frame: np.ndarray) -> tuple[list[dict], float]:
-    model   = get_victim_model()
-    state   = victim_state()
-    t0      = time.perf_counter()
+    # Prefer DirectML ONNX session (GPU, no PyTorch)
+    if get_victim_ort_session() is not None:
+        return _run_victim_ort(frame)
+
+    model  = get_victim_model()
+    state  = victim_state()
+    t0     = time.perf_counter()
 
     if model is None:
         import random
@@ -185,7 +279,6 @@ def _run_victim(frame: np.ndarray) -> tuple[list[dict], float]:
             conf    = float(box.conf[0])
             x1, y1, x2, y2 = box.xyxy[0].tolist()
 
-            # Custom model: class 0 = person; COCO fallback: class 0 = person too
             if state.is_custom:
                 label = "person"
             elif cls_id == PERSON_CLASS:
@@ -195,16 +288,11 @@ def _run_victim(frame: np.ndarray) -> tuple[list[dict], float]:
             else:
                 continue
 
-            detections.append(
-                {
-                    "class":      label,
-                    "confidence": round(conf, 3),
-                    "bbox":       {
-                        "x": int(x1), "y": int(y1),
-                        "w": int(x2 - x1), "h": int(y2 - y1),
-                    },
-                }
-            )
+            detections.append({
+                "class":      label,
+                "confidence": round(conf, 3),
+                "bbox":       {"x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1)},
+            })
 
     return detections, round(elapsed_ms, 1)
 
@@ -239,6 +327,33 @@ async def detect_objects(payload: dict = Body(...)):
     else:
         display_frame            = frame
         detections, inference_ms = _run_victim(frame)
+
+    # ── SORT tracking — assign persistent IDs via Kalman filter ─────────────
+    if detections:
+        det_arr = np.array([
+            [d["bbox"]["x"], d["bbox"]["y"],
+             d["bbox"]["x"] + d["bbox"]["w"],
+             d["bbox"]["y"] + d["bbox"]["h"],
+             d["confidence"]]
+            for d in detections
+        ], dtype=np.float32)
+        tracked = _tracker.update(det_arr)  # [M, 6]: x1,y1,x2,y2,score,track_id
+        detections = []
+        for row in tracked:
+            x1, y1, x2, y2, score, tid = row
+            fh, fw = frame.shape[:2]
+            detections.append({
+                "class":      "person",
+                "confidence": round(float(score), 3),
+                "track_id":   int(tid),
+                "bbox":       {
+                    "x": max(0, int(x1)), "y": max(0, int(y1)),
+                    "w": min(fw - max(0, int(x1)), int(x2 - x1)),
+                    "h": min(fh - max(0, int(y1)), int(y2 - y1)),
+                },
+            })
+    else:
+        _tracker.update(np.empty((0, 5), dtype=np.float32))
 
     frame_id  = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()
