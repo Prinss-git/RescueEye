@@ -3,5 +3,5 @@
 export const SERVER_IP = '192.168.254.195'
 export const SERVER_PORT = 8000
 
-export const API_BASE  = `http://${SERVER_IP}:${SERVER_PORT}/api`
-export const STREAM_URL = `http://${SERVER_IP}:${SERVER_PORT}/api/stream/feed3`
+export const API_BASE   = `http://${SERVER_IP}:${SERVER_PORT}`
+export const STREAM_URL = `http://${SERVER_IP}:${SERVER_PORT}/stream/feed3`

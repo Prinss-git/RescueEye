@@ -30,7 +30,9 @@
           "icon": "./assets/icon.png",
           "color": "#00d4ff"
         }
-      ]
+      ],
+      "expo-asset",
+      "expo-font"
     ]
   }
 }
