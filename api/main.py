@@ -3,14 +3,14 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+load_dotenv()  # MUST be before any router imports so env vars are available at module load
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import detect, classify, detections
 from routers import stream, models as models_router, logs as logs_router
 from services.yolo_model import load_all, model_info, model_status
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,

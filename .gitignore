@@ -32,6 +32,15 @@ api/data/*.mp4
 api/data/*.avi
 api/data/*.mkv
 
+# Training datasets (images/labels — retrain separately)
+api/data/damage/train/
+api/data/damage/val/
+api/data/damage/test/
+api/data/victim/images/
+api/data/victim/labels/
+api/data/raw/
+tools/datasets/
+
 # YOLO base weights in root
 api/yolov8n.pt
 api/yolov8n-cls.pt

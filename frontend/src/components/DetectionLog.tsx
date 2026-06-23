@@ -25,11 +25,11 @@ const CLASS_ACCENT: Record<string, string> = {
 }
 
 const CLASS_LABEL: Record<string, string> = {
-  person:            'PERSON',
-  life_sign:         'LIFE SIGN',
-  fire_damage:       'FIRE DMG',
-  flood_damage:      'FLOOD DMG',
-  structural_damage: 'STRUCT DMG',
+  person:            'CASUALTY',
+  life_sign:         'CASUALTY · THERMAL',
+  fire_damage:       'FIRE DAMAGE',
+  flood_damage:      'FLOOD DAMAGE',
+  structural_damage: 'STRUCTURAL DMG',
 }
 
 function confidenceLabel(c: number) {
@@ -49,14 +49,14 @@ export default function DetectionLog({ detections, latestFrame, onClear }: Detec
       <div className="flex-shrink-0 flex items-center justify-between px-3 py-2"
         style={{ background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
         <span className="font-mono text-[9px] font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
-          DETECTION LOG
+          CASUALTY LOG
         </span>
         <div className="flex items-center gap-2">
           <span className="font-mono text-[9px] px-1.5 py-0.5 rounded font-bold"
             style={detections.length > 0
               ? { background: 'rgba(255,59,59,0.15)', color: '#ff3b3b', border: '1px solid rgba(255,59,59,0.25)' }
               : { color: 'rgba(255,255,255,0.2)' }}>
-            {detections.length} EVENT{detections.length !== 1 ? 'S' : ''}
+            {detections.length} CASUALT{detections.length !== 1 ? 'IES' : 'Y'}
           </span>
           {onClear && detections.length > 0 && (
             <button onClick={onClear}
@@ -91,7 +91,7 @@ export default function DetectionLog({ detections, latestFrame, onClear }: Detec
               </svg>
             </div>
             <p className="font-mono text-[10px] tracking-wider" style={{ color: 'rgba(255,255,255,0.18)' }}>
-              AWAITING DETECTIONS
+              SCANNING FOR CASUALTIES
             </p>
           </div>
         ) : (

@@ -38,10 +38,15 @@ LATENCY_WARN_MS      = float(os.getenv("LATENCY_WARN_MS",      "3000"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.40"))
 INCIDENT_CONF_MIN    = float(os.getenv("INCIDENT_CONF_MIN",    "0.75"))
 NODE_SERVER_URL      = os.getenv("NODE_SERVER_URL", "http://localhost:3001")
+NTFY_TOPIC           = os.getenv("NTFY_TOPIC", "rescueeye-alerts")
+NTFY_MIN_CONF        = float(os.getenv("NTFY_MIN_CONF", "0.10"))
 GRID_COOLDOWN_S      = 10.0
+NTFY_COOLDOWN_S      = 30.0
 
 _grid_cooldown: dict[tuple[int, int], float] = {}
 _grid_lock = asyncio.Lock()
+_ntfy_last_sent: float = 0.0
+_ntfy_lock = asyncio.Lock()
 
 # SORT tracker — persists across requests, maintains Kalman state per person
 _tracker = Sort(max_age=4, min_hits=1, iou_threshold=0.20)
@@ -85,6 +90,45 @@ async def _maybe_create_incident(detection: dict) -> None:
             )
     except Exception as exc:
         logger.debug(f"[detect] Incident bridge error (non-fatal): {exc}")
+
+
+async def _send_ntfy_alert(detection: dict) -> None:
+    global _ntfy_last_sent
+    if detection.get("confidence", 0) < NTFY_MIN_CONF:
+        return
+    now = time.monotonic()
+    async with _ntfy_lock:
+        if now - _ntfy_last_sent < NTFY_COOLDOWN_S:
+            return
+        _ntfy_last_sent = now
+    from services.detection_store import CEBU_LAT, CEBU_LNG
+    import random
+    lat = round(random.uniform(*CEBU_LAT), 4)
+    lng = round(random.uniform(*CEBU_LNG), 4)
+    conf_pct = round(detection["confidence"] * 100)
+    tid = detection.get("track_id", "?")
+    body = (
+        f"Casualty detected — {conf_pct}% confidence\n"
+        f"Track ID: #{tid}\n"
+        f"GPS: {lat}, {lng}\n"
+        f"Dispatch nearest field team immediately."
+    )
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            await client.post(
+                f"https://ntfy.sh/{NTFY_TOPIC}",
+                content=body.encode(),
+                headers={
+                    "Title":    "RescueEye — Casualty Detected",
+                    "Priority": "urgent",
+                    "Tags":     "sos,rotating_light",
+                    "Click":    f"https://www.openstreetmap.org/?mlat={lat}&mlon={lng}&zoom=17",
+                },
+            )
+        logger.info(f"[detect] ntfy alert sent → ntfy.sh/{NTFY_TOPIC} (conf={conf_pct}%)")
+    except Exception as exc:
+        logger.debug(f"[detect] ntfy error (non-fatal): {exc}")
 
 
 def _decode_frame(b64: str) -> np.ndarray:
@@ -214,6 +258,7 @@ def _run_victim_ort(frame: np.ndarray) -> tuple[list[dict], float]:
     cx, cy, bw, bh = preds[0], preds[1], preds[2], preds[3]
     conf = preds[4]
 
+    logger.info(f"[ort] threshold={CONFIDENCE_THRESHOLD} max_conf={conf.max():.4f} frame={frame.shape}")
     mask = conf >= CONFIDENCE_THRESHOLD
     if not mask.any():
         elapsed = (time.perf_counter() - t0) * 1000
@@ -302,7 +347,6 @@ async def detect_objects(payload: dict = Body(...)):
     b64 = payload.get("frame", "")
     if not b64:
         raise HTTPException(422, "'frame' field with base64 JPEG is required")
-
     try:
         frame = _decode_frame(b64)
     except Exception as exc:
@@ -387,9 +431,10 @@ async def detect_objects(payload: dict = Body(...)):
         "mode":            mode,
     })
 
-    # Bridge high-confidence detections to Node.js /incidents (non-blocking)
+    # Bridge high-confidence detections to Node.js /incidents + ntfy push (non-blocking)
     for det in annotated:
         asyncio.create_task(_maybe_create_incident(det))
+        asyncio.create_task(_send_ntfy_alert(det))
 
     logger.info(
         f"[detect] mode={mode} brightness={brightness:.0f} "

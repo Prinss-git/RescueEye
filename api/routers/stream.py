@@ -8,25 +8,31 @@ import io
 import logging
 import math
 import os
+import shutil
 import subprocess
 import time
+from pathlib import Path
 from threading import Event, Lock, Thread
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 logger = logging.getLogger("rescueeye.stream")
 router = APIRouter()
 
+UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
+ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".ts", ".webm", ".m4v"}
+
 # ── Frame buffer ──────────────────────────────────────────────────────────────
-_lock3          = Lock()
+_lock3           = Lock()
 _current_frame3: bytes | None = None
-_stream_active3 = False
-_stream_source3 = "none"
+_stream_active3  = False
+_stream_source3  = "none"
+_active_source3  = ""          # current URL/path being played
 _ffmpeg_proc3: subprocess.Popen | None = None
-_stop_event3    = Event()
+_stop_event3     = Event()
 
 
 def _encode_pil(img: Image.Image, quality: int = 75) -> bytes:
@@ -70,12 +76,25 @@ def _synthetic_frame(tick: int, width: int = 640, height: int = 480) -> bytes:
 
 
 # ── FFmpeg producer ───────────────────────────────────────────────────────────
+def _is_network_source(source: str) -> bool:
+    return source.startswith(("rtsp://", "rtsps://", "rtmp://", "udp://", "http://", "https://"))
+
+
+def _build_ffmpeg_cmd(source: str, fps: float) -> list[str]:
+    """Build FFmpeg command with source-appropriate flags."""
+    cmd = ["ffmpeg", "-loglevel", "error"]
+    if source.startswith(("rtsp://", "rtsps://")):
+        cmd += ["-rtsp_transport", "tcp", "-timeout", "5000000"]
+    if not _is_network_source(source):
+        cmd += ["-re"]          # pace file playback; omit for live network sources
+    cmd += ["-i", source, "-vf", f"fps={fps}", "-f", "image2pipe",
+            "-vcodec", "mjpeg", "-q:v", "3", "pipe:1"]
+    return cmd
+
+
 def _ffmpeg_reader3(path: str, fps: float):
     global _current_frame3, _stream_active3, _stream_source3, _ffmpeg_proc3
-    # No scale filter — store native-res frames so YOLO gets full detail.
-    cmd = ["ffmpeg", "-loglevel", "error", "-re", "-i", path,
-           "-vf", f"fps={fps}", "-f", "image2pipe",
-           "-vcodec", "mjpeg", "-q:v", "3", "pipe:1"]
+    cmd = _build_ffmpeg_cmd(path, fps)
     logger.info(f"[stream3] FFmpeg cmd: {' '.join(cmd)}")
     _stream_source3 = "ffmpeg"
     _stream_active3 = True
@@ -126,22 +145,35 @@ def _synthetic_producer3(fps: float):
     _stream_active3 = False
 
 
-def _start_producer3():
-    global _stream_active3
+def _start_producer3(source: str = ""):
+    global _stream_active3, _active_source3
     if _stream_active3:
         return
     _stop_event3.clear()
-    path = os.getenv("DRONE_FEED_PATH_3", "")
-    fps  = float(os.getenv("FRAME_RATE", "5"))
-    if path and os.path.isfile(path):
-        logger.info(f"[stream3] Starting FFmpeg producer — {path} @ {fps} fps")
-        Thread(target=_ffmpeg_reader3, args=(path, fps), daemon=True).start()
+    if not source:
+        source = os.getenv("DRONE_FEED_PATH_3", "")
+    fps = float(os.getenv("FRAME_RATE", "8"))
+    _active_source3 = source
+    if source and (_is_network_source(source) or os.path.isfile(source)):
+        logger.info(f"[stream3] Starting FFmpeg producer — {source} @ {fps} fps")
+        Thread(target=_ffmpeg_reader3, args=(source, fps), daemon=True).start()
     else:
-        if path:
-            logger.warning(f"[stream3] DRONE_FEED_PATH_3 '{path}' not found — synthetic mode")
-        else:
-            logger.info("[stream3] No DRONE_FEED_PATH_3 set — synthetic mode")
+        if source:
+            logger.warning(f"[stream3] Source '{source}' not found — synthetic mode")
         Thread(target=_synthetic_producer3, args=(fps,), daemon=True).start()
+
+
+def switch_source(source: str) -> None:
+    """Stop the current producer and start a new one with the given source."""
+    global _stream_active3, _active_source3
+    logger.info(f"[stream3] Switching source → {source or '(synthetic)'}")
+    _stop_event3.set()
+    proc = _ffmpeg_proc3
+    if proc:
+        proc.terminate()
+    _stream_active3 = False
+    time.sleep(0.8)
+    _start_producer3(source)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -183,13 +215,36 @@ async def stream_feed3():
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@router.post("/source")
+async def set_stream_source(payload: dict = Body(...)):
+    source = (payload.get("source") or "").strip()
+    switch_source(source)
+    return {"ok": True, "source": source or "synthetic"}
+
+
+@router.post("/upload")
+async def upload_drone_feed(file: UploadFile = File(...)):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_VIDEO_EXTS:
+        raise HTTPException(422, f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_VIDEO_EXTS)}")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename).name
+    dest = UPLOAD_DIR / safe_name
+    with dest.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+    logger.info(f"[stream3] Uploaded feed: {dest} ({dest.stat().st_size // 1024} KB)")
+    switch_source(str(dest))
+    return {"ok": True, "filename": safe_name, "path": str(dest)}
+
+
 @router.get("/status")
 async def stream_status():
     return {
-        "active":     _stream_active3,
-        "fps":        float(os.getenv("FRAME_RATE", "5")),
-        "source":     _stream_source3,
-        "has_frame":  _current_frame3 is not None,
+        "active":        _stream_active3,
+        "fps":           float(os.getenv("FRAME_RATE", "8")),
+        "source":        _stream_source3,
+        "active_source": _active_source3,
+        "has_frame":     _current_frame3 is not None,
     }
 
 

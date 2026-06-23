@@ -7,11 +7,41 @@ const DETECT_URL   = `${API}/detect`
 const STATUS_URL   = `${API}/stream/status`
 const MODELS_URL   = `${API}/models/status`
 
-const MAX_LOG_ENTRIES    = 50
-const DETECT_INTERVAL_MS = 400
-const STATUS_POLL_MS     = 3000
-const MODEL_POLL_MS      = 10000
-const BOX_FADE_MS        = 4000
+const MAX_LOG_ENTRIES     = 50
+const DETECT_INTERVAL_MS  = 400
+const CLASSIFY_INTERVAL_MS = 2500
+const STATUS_POLL_MS      = 3000
+const MODEL_POLL_MS       = 10000
+const BOX_FADE_MS         = 8000
+
+const DAMAGE_COLOR: Record<string, string> = {
+  flood_damage:      '#00d4ff',
+  fire_damage:       '#ff7700',
+  structural_damage: '#f97316',
+}
+const DAMAGE_DISPLAY: Record<string, string> = {
+  flood_damage:      'FLOOD DAMAGE',
+  fire_damage:       'FIRE DAMAGE',
+  structural_damage: 'STRUCTURAL DMG',
+}
+
+const SEVERITY_COLOR: Record<string, string> = {
+  CRITICAL: '#ff3b3b',
+  MODERATE: '#f59e0b',
+  MINOR:    '#ffdc00',
+}
+
+const DRONE_BRANDS = [
+  { name: 'DJI Mavic / Mini / Air', url: 'rtsp://192.168.1.1:554/live',      hint: 'WiFi AP mode' },
+  { name: 'DJI via RC Pro',         url: 'rtsp://192.168.1.1:8554/live',     hint: 'RC Pro / Goggles 3' },
+  { name: 'DJI Phantom 4',          url: 'rtsp://192.168.10.1:554/live',     hint: 'Phantom 4 series' },
+  { name: 'Parrot Anafi / USA',     url: 'rtsp://192.168.42.1/live',         hint: 'Anafi default AP' },
+  { name: 'Autel EVO II',           url: 'rtsp://192.168.1.1:8554/stream0',  hint: 'EVO II series' },
+  { name: 'Skydio 2 / X10',        url: 'rtsp://192.168.1.1:8080/video',    hint: 'Skydio Beacon mode' },
+  { name: 'FPV / PX4 Companion',   url: 'udp://@0.0.0.0:5600',             hint: 'MAVLink UDP stream' },
+  { name: 'ONVIF IP Camera',        url: 'rtsp://192.168.1.100:554/stream1', hint: 'Generic ONVIF device' },
+  { name: 'Custom / Manual',        url: '',                                  hint: 'Enter URL below manually' },
+]
 
 type FeedStatus = 'ACTIVE' | 'CONNECTING' | 'OFFLINE'
 
@@ -54,6 +84,12 @@ const CLASS_COLOR: Record<string, string> = {
   structural_damage:  '#f97316',
 }
 
+// Display label overrides shown on canvas
+const CANVAS_LABEL: Record<string, string> = {
+  person:    'CASUALTY',
+  life_sign: 'CASUALTY·THERMAL',
+}
+
 export default function Dashboard() {
   const [feedStatus, setFeedStatus]     = useState<FeedStatus>('CONNECTING')
   const [detections, setDetections]     = useState<Detection[]>([])
@@ -70,11 +106,22 @@ export default function Dashboard() {
   const [latestFrame, setLatestFrame]   = useState<string | null>(null)
   const [clock, setClock]               = useState('')
 
-  const imgRef       = useRef<HTMLImageElement>(null)
-  const canvasRef    = useRef<HTMLCanvasElement>(null)
-  const hiddenCanvas = useRef<HTMLCanvasElement>(null)
-  const forceModeRef = useRef<'auto' | 'visual' | 'thermal'>('auto')
-  const detectingRef = useRef(false)
+  const [damageLabel,   setDamageLabel]   = useState<{ label: string; confidence: number; severity?: string; suggested_action?: string } | null>(null)
+  const [selectedDrone, setSelectedDrone] = useState('')
+  const [sourceInput,   setSourceInput]   = useState('')
+  const [sourceSetting, setSourceSetting] = useState(false)
+  const [sourceMode,    setSourceMode]    = useState<'live' | 'upload'>('live')
+  const [uploadStatus,  setUploadStatus]  = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const [uploadedName,  setUploadedName]  = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const imgRef            = useRef<HTMLImageElement>(null)
+  const canvasRef         = useRef<HTMLCanvasElement>(null)
+  const hiddenCanvas      = useRef<HTMLCanvasElement>(null)
+  const classifyCanvas    = useRef<HTMLCanvasElement>(null)
+  const forceModeRef      = useRef<'auto' | 'visual' | 'thermal'>('auto')
+  const detectingRef      = useRef(false)
+  const lastDamageLabelRef = useRef<string | null>(null)
 
   type RawDet = DetectResponse['detections'][0]
   type TrackedDet = RawDet & { vx: number; vy: number }
@@ -158,7 +205,7 @@ export default function Dashboard() {
                 const { w, h } = d.bbox
                 const color = CLASS_COLOR[d.class] ?? '#ffffff'
                 const conf  = Math.round(d.confidence * 100)
-                const label = `${d.class.toUpperCase()} ${conf}%`
+                const label = `${CANVAS_LABEL[d.class] ?? d.class.toUpperCase()} ${conf}%`
                 ctx.strokeStyle = color
                 ctx.lineWidth   = 2 / scale
                 ctx.strokeRect(x, y, w, h)
@@ -229,7 +276,10 @@ export default function Dashboard() {
           trackHistoryRef.current.set(tid, { bbox: d.bbox, ts: now })
           return { ...d, vx, vy }
         })
-        overlayRef.current = { dets: tracked, imgW: img.naturalWidth, imgH: img.naturalHeight, ts: now }
+        // Only update overlay when we have detections — preserves last known position between frames
+        if (tracked.length > 0) {
+          overlayRef.current = { dets: tracked, imgW: img.naturalWidth, imgH: img.naturalHeight, ts: now }
+        }
 
         setInferenceMs(data.inference_time_ms)
         setTotalFrames((n) => n + 1)
@@ -259,6 +309,87 @@ export default function Dashboard() {
     runDetect()
     return () => { clearInterval(t); detectingRef.current = false }
   }, [detecting])
+
+  // Damage classification loop — runs every 2.5s while scanning
+  useEffect(() => {
+    if (!detecting) { setDamageLabel(null); lastDamageLabelRef.current = null; return }
+
+    async function runClassify() {
+      const img    = imgRef.current
+      const canvas = classifyCanvas.current
+      if (!img || !canvas || !img.naturalWidth) return
+      try {
+        canvas.width  = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const b64 = canvas.toDataURL('image/jpeg', 0.80)
+        const res = await fetch(`${API}/classify`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frame: b64 }),
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.label && data.label !== 'no_damage' && data.confidence > 0.40) {
+          setDamageLabel({ label: data.label, confidence: data.confidence, severity: data.severity, suggested_action: data.suggested_action })
+          if (data.label !== lastDamageLabelRef.current) {
+            lastDamageLabelRef.current = data.label
+            const dmgEntry: Detection = {
+              id:         `dmg-${Date.now()}`,
+              class:      data.label,
+              confidence: data.confidence,
+              bbox:       [0, 0, 0, 0],
+              timestamp:  new Date().toLocaleTimeString('en-PH', { hour12: false }),
+              feed:       'FEED 3',
+            }
+            setDetections((prev) => {
+              const next = prev.concat(dmgEntry)
+              return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next
+            })
+          }
+        } else {
+          setDamageLabel(null)
+          lastDamageLabelRef.current = null
+        }
+      } catch { /* classify offline */ }
+    }
+
+    const t = setInterval(runClassify, CLASSIFY_INTERVAL_MS)
+    runClassify()
+    return () => clearInterval(t)
+  }, [detecting])
+
+  async function applyDroneSource(source: string) {
+    setSourceSetting(true)
+    try {
+      await fetch(`${API}/stream/source`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source }),
+      })
+    } catch { /* non-fatal */ }
+    setSourceSetting(false)
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadStatus('uploading')
+    setUploadedName(file.name)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`${API}/stream/upload`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(await res.text())
+      setUploadStatus('done')
+    } catch {
+      setUploadStatus('error')
+    }
+    // reset file input so same file can be re-uploaded
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   function formatElapsed(s: number) {
     const m = Math.floor(s / 60)
@@ -292,13 +423,13 @@ export default function Dashboard() {
             </div>
             <div>
               <div className="font-mono font-bold text-sm tracking-widest" style={{ color: '#00d4ff' }}>RESCUEEYE</div>
-              <div className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>AERIAL SAR INTELLIGENCE SYSTEM</div>
+              <div className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>PORTABLE SAR FIELD RESPONSE SYSTEM</div>
             </div>
           </div>
           <div className="w-px h-8 mx-1" style={{ background: 'rgba(255,255,255,0.08)' }} />
           <div>
-            <div className="font-mono text-[10px] font-bold tracking-wider" style={{ color: 'rgba(255,255,255,0.7)' }}>OPERATION ODETTE</div>
-            <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>CEBU PROVINCE, PHILIPPINES · SECTOR GRID 12-DELTA</div>
+            <div className="font-mono text-[10px] font-bold tracking-wider" style={{ color: 'rgba(255,255,255,0.7)' }}>OPERATION ODETTE · CASUALTY DETECTION</div>
+            <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>CEBU PROVINCE, PHILIPPINES · DEPLOYABLE FIELD UNIT</div>
           </div>
         </div>
 
@@ -318,7 +449,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-3">
             <Metric label="ELAPSED" value={formatElapsed(elapsedSec)} />
             <Metric label="FRAMES"  value={String(totalFrames)} />
-            <Metric label="ALERTS"  value={String(detections.length)}
+            <Metric label="CASUALTIES" value={String(detections.length)}
               valueColor={detections.length > 0 ? '#ff3b3b' : undefined} />
             {inferenceMs !== null && (
               <Metric label="AI LAT" value={`${Math.round(inferenceMs)}ms`} valueColor={latColor} />
@@ -335,12 +466,12 @@ export default function Dashboard() {
         <div className="flex-shrink-0 flex items-center gap-3 px-4 py-1.5"
           style={{ background: '#0a0f1c', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <span className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.2)' }}>MODELS</span>
-          <ModelChip label="VICTIM DETECT" info={modelsStatus.victim_model}
+          <ModelChip label="CASUALTY DETECT" info={modelsStatus.victim_model}
             metric={modelsStatus.victim_model.map50 != null ? `mAP ${modelsStatus.victim_model.map50.toFixed(3)}` : undefined} />
-          <ModelChip label="DAMAGE CLASS"  info={modelsStatus.damage_model}
+          <ModelChip label="DAMAGE CLASS"    info={modelsStatus.damage_model}
             metric={modelsStatus.damage_model.accuracy != null ? `ACC ${modelsStatus.damage_model.accuracy.toFixed(3)}` : undefined} />
           <div className="ml-auto font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
-            YOLO11s · ONNX-DirectML · RTX 4050
+            YOLO11s · ONNX-DirectML · RTX 4050 · FIELD-DEPLOYABLE
           </div>
         </div>
       )}
@@ -353,7 +484,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-2 min-h-0 overflow-y-auto pr-0.5">
 
           {/* Scan control */}
-          <SideSection title="SCAN CONTROL">
+          <SideSection title="CASUALTY SCAN">
             <button
               onClick={() => setDetecting((d) => !d)}
               className="w-full font-mono font-bold text-xs py-2.5 rounded transition-all tracking-widest"
@@ -422,10 +553,10 @@ export default function Dashboard() {
           </SideSection>
 
           {/* Platform telemetry */}
-          <SideSection title="PLATFORM">
+          <SideSection title="FIELD UNIT">
             <div className="space-y-0">
               {([
-                ['DRONE ID',  'UAV-ALPHA-01', '#00d4ff'],
+                ['UNIT ID',   'UAV-ALPHA-01', '#00d4ff'],
                 ['ALTITUDE',  '120 m AGL',    '#00d4ff'],
                 ['AIRSPEED',  '8.4 m/s',      '#00d4ff'],
                 ['BATTERY',   '74 %',         '#22c55e'],
@@ -438,6 +569,118 @@ export default function Dashboard() {
                   <span className="font-mono text-[10px] font-bold" style={{ color: vc }}>{v}</span>
                 </div>
               ))}
+            </div>
+          </SideSection>
+
+          {/* Drone source */}
+          <SideSection title="DRONE SOURCE">
+            <div className="space-y-2">
+              {/* Mode toggle */}
+              <div className="grid grid-cols-2 gap-1 p-0.5 rounded"
+                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                {(['live', 'upload'] as const).map((m) => (
+                  <button key={m} onClick={() => setSourceMode(m)}
+                    className="py-1 rounded font-mono text-[10px] font-bold tracking-widest transition-all"
+                    style={sourceMode === m
+                      ? { background: 'rgba(0,212,255,0.15)', color: '#00d4ff', border: '1px solid rgba(0,212,255,0.4)' }
+                      : { color: 'rgba(255,255,255,0.25)', border: '1px solid transparent' }}>
+                    {m === 'live' ? '▶ LIVE' : '↑ UPLOAD'}
+                  </button>
+                ))}
+              </div>
+
+              {sourceMode === 'live' ? (
+                <>
+                  <div className="flex gap-1">
+                    <input
+                      value={sourceInput}
+                      onChange={(e) => setSourceInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && sourceInput.trim()) applyDroneSource(sourceInput.trim()) }}
+                      placeholder="rtsp://192.168.1.1/live"
+                      spellCheck={false}
+                      className="flex-1 font-mono text-[10px] px-2 py-1.5 rounded min-w-0"
+                      style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'rgba(255,255,255,0.8)', outline: 'none' }}
+                    />
+                    <button
+                      onClick={() => sourceInput.trim() && applyDroneSource(sourceInput.trim())}
+                      disabled={sourceSetting || !sourceInput.trim()}
+                      className="font-mono text-[10px] font-bold px-2 py-1 rounded tracking-wider disabled:opacity-30 transition-all"
+                      style={{ background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.4)', color: '#00d4ff' }}>
+                      {sourceSetting ? '…' : 'SET'}
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="font-mono text-[9px] tracking-wider block"
+                      style={{ color: 'rgba(255,255,255,0.25)' }}>DRONE BRAND</span>
+                    <select
+                      value={selectedDrone}
+                      onChange={(e) => {
+                        const brand = DRONE_BRANDS.find((b) => b.name === e.target.value)
+                        setSelectedDrone(e.target.value)
+                        if (brand !== undefined) setSourceInput(brand.url)
+                      }}
+                      className="w-full font-mono text-[10px] px-2 py-1.5 rounded"
+                      style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.12)',
+                        color: 'rgba(255,255,255,0.7)', outline: 'none' }}>
+                      <option value="">— select brand —</option>
+                      {DRONE_BRANDS.map((b) => (
+                        <option key={b.name} value={b.name}>{b.name}</option>
+                      ))}
+                    </select>
+                    {selectedDrone && (
+                      <p className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.22)' }}>
+                        {DRONE_BRANDS.find((b) => b.name === selectedDrone)?.hint}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-1 pt-0.5">
+                      {[
+                        { label: 'Demo video', url: 'd:/RescueEye/api/data/demo_feed8_trim.mp4' },
+                        { label: 'Synthetic',  url: '' },
+                      ].map(({ label, url }) => (
+                        <button key={label}
+                          onClick={() => { setSourceInput(url); setSelectedDrone(''); applyDroneSource(url) }}
+                          className="font-mono text-[10px] py-1 rounded px-2 text-center transition-all"
+                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
+                            color: 'rgba(255,255,255,0.35)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.8)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadStatus === 'uploading'}
+                    className="w-full font-mono text-[10px] font-bold py-3 rounded tracking-widest transition-all disabled:opacity-40"
+                    style={{ background: 'rgba(0,212,255,0.08)', border: '2px dashed rgba(0,212,255,0.3)',
+                      color: '#00d4ff' }}>
+                    {uploadStatus === 'uploading' ? 'UPLOADING…' : '↑  SELECT VIDEO FILE'}
+                  </button>
+                  <input ref={fileInputRef} type="file"
+                    accept="video/mp4,video/quicktime,video/x-msvideo,video/webm,.mp4,.mov,.avi,.mkv,.ts,.webm,.m4v"
+                    className="hidden" onChange={handleFileUpload} />
+                  {uploadStatus === 'done' && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded"
+                      style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
+                      <span className="text-[10px]" style={{ color: '#22c55e' }}>✓</span>
+                      <span className="font-mono text-[9px] truncate" style={{ color: '#22c55e' }}>{uploadedName}</span>
+                    </div>
+                  )}
+                  {uploadStatus === 'error' && (
+                    <p className="font-mono text-[9px] text-center" style={{ color: '#ff3b3b' }}>
+                      Upload failed — check file type
+                    </p>
+                  )}
+                  <p className="font-mono text-[9px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                    Supported: MP4, MOV, AVI, MKV, TS, WebM · File uploads automatically, stream switches instantly
+                  </p>
+                </div>
+              )}
             </div>
           </SideSection>
 
@@ -524,6 +767,58 @@ export default function Dashboard() {
               </div>
             )}
 
+            {/* Night mode banner */}
+            {detecting && detectMode === 'thermal' && (
+              <div className="absolute top-2 right-2 flex items-center gap-1.5 px-2.5 py-1 rounded pointer-events-none"
+                style={{ zIndex: 20, background: 'rgba(245,158,11,0.15)',
+                  border: '1px solid rgba(245,158,11,0.45)', backdropFilter: 'blur(4px)' }}>
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: '#f59e0b', animation: 'pulse 1.5s infinite' }} />
+                <span className="font-mono text-[9px] font-bold tracking-widest" style={{ color: '#f59e0b' }}>
+                  NIGHT MODE · THERMAL
+                </span>
+              </div>
+            )}
+
+            {/* Damage classification badge */}
+            {damageLabel && detecting && (
+              <div className="absolute bottom-3 left-3 flex flex-col gap-1 px-3 py-2 rounded-lg"
+                style={{
+                  zIndex: 15,
+                  background: 'rgba(7,11,20,0.92)',
+                  border: `1px solid ${DAMAGE_COLOR[damageLabel.label] ?? '#ffffff44'}55`,
+                  backdropFilter: 'blur(6px)',
+                  maxWidth: '240px',
+                }}>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0"
+                    style={{ background: DAMAGE_COLOR[damageLabel.label] ?? '#fff' }} />
+                  <span className="font-mono text-[10px] font-bold tracking-wider"
+                    style={{ color: DAMAGE_COLOR[damageLabel.label] ?? '#fff' }}>
+                    {DAMAGE_DISPLAY[damageLabel.label] ?? damageLabel.label.toUpperCase()}
+                  </span>
+                  {damageLabel.severity && damageLabel.severity !== 'CLEAR' && (
+                    <span className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                      style={{
+                        background: `${SEVERITY_COLOR[damageLabel.severity] ?? '#fff'}18`,
+                        color: SEVERITY_COLOR[damageLabel.severity] ?? '#fff',
+                        border: `1px solid ${SEVERITY_COLOR[damageLabel.severity] ?? '#fff'}33`,
+                      }}>
+                      {damageLabel.severity}
+                    </span>
+                  )}
+                  <span className="font-mono text-[9px] ml-auto" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    {Math.round(damageLabel.confidence * 100)}%
+                  </span>
+                </div>
+                {damageLabel.suggested_action && (
+                  <p className="font-mono text-[9px] leading-relaxed pl-4" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    {damageLabel.suggested_action}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Corner grid overlay (decorative) */}
             <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
               {/* Top-left corner marks */}
@@ -561,7 +856,8 @@ export default function Dashboard() {
 
       </div>
 
-      <canvas ref={hiddenCanvas} className="hidden" />
+      <canvas ref={hiddenCanvas}   className="hidden" />
+      <canvas ref={classifyCanvas} className="hidden" />
     </div>
   )
 }

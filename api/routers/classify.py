@@ -35,6 +35,32 @@ def _decode_frame(b64: str) -> np.ndarray:
     return np.array(Image.open(io.BytesIO(raw)).convert("RGB"))
 
 
+def _get_severity(label: str, confidence: float) -> tuple[str, str]:
+    """Map damage label + confidence to (severity_tier, suggested_action)."""
+    if label == "no_damage":
+        return "CLEAR", "No immediate action required"
+    crit_thresh = {"fire_damage": 0.80, "structural_damage": 0.80, "flood_damage": 0.80}
+    mod_thresh  = {"fire_damage": 0.55, "structural_damage": 0.55, "flood_damage": 0.55}
+    actions: dict[tuple[str, str], str] = {
+        ("fire_damage",       "CRITICAL"): "Deploy fire suppression — immediate evacuation required",
+        ("fire_damage",       "MODERATE"): "Alert fire responders — monitor active spread",
+        ("fire_damage",       "MINOR"):    "Early fire signs — investigate the area",
+        ("structural_damage", "CRITICAL"): "Do not enter — structural collapse risk",
+        ("structural_damage", "MODERATE"): "Assess load-bearing integrity before entry",
+        ("structural_damage", "MINOR"):    "Surface damage — inspect foundations",
+        ("flood_damage",      "CRITICAL"): "Evacuation zone — deploy water rescue units immediately",
+        ("flood_damage",      "MODERATE"): "Rising water — stage rescue assets nearby",
+        ("flood_damage",      "MINOR"):    "Localised flooding — monitor water levels",
+    }
+    if confidence >= crit_thresh.get(label, 0.80):
+        tier = "CRITICAL"
+    elif confidence >= mod_thresh.get(label, 0.55):
+        tier = "MODERATE"
+    else:
+        tier = "MINOR"
+    return tier, actions.get((label, tier), f"{tier.title()} damage detected — assess area")
+
+
 @router.post("")
 async def classify_damage(payload: dict = Body(...)):
     b64 = payload.get("frame", "")
@@ -53,11 +79,15 @@ async def classify_damage(payload: dict = Body(...)):
     if model is None:
         import random
         label = random.choice(DAMAGE_CLASS_NAMES)
+        conf  = round(random.uniform(0.72, 0.93), 2)
+        tier, action = _get_severity(label, conf)
         return {
-            "label":           label,
-            "confidence":      round(random.uniform(0.72, 0.93), 2),
-            "timestamp":       timestamp,
-            "model_version":   "stub",
+            "label":            label,
+            "confidence":       conf,
+            "severity":         tier,
+            "suggested_action": action,
+            "timestamp":        timestamp,
+            "model_version":    "stub",
         }
 
     t0 = time.perf_counter()
@@ -92,15 +122,18 @@ async def classify_damage(payload: dict = Body(...)):
             best_conf  = 0.70
         label, conf = best_label, best_conf
 
+    tier, action = _get_severity(label, float(conf))
     logger.info(
-        f"[classify] label={label} conf={conf:.2f} "
+        f"[classify] label={label} conf={conf:.2f} severity={tier} "
         f"inference={inference_ms:.0f}ms model={state.version}"
     )
 
     return {
-        "label":           label,
-        "confidence":      round(float(conf), 3),
-        "timestamp":       timestamp,
+        "label":            label,
+        "confidence":       round(float(conf), 3),
+        "severity":         tier,
+        "suggested_action": action,
+        "timestamp":        timestamp,
         "inference_time_ms": inference_ms,
-        "model_version":   state.version,
+        "model_version":    state.version,
     }

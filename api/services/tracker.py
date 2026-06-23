@@ -36,7 +36,7 @@ def _to_bbox(x: np.ndarray) -> np.ndarray:
 class _KalmanTrack:
     _next_id = 0
 
-    def __init__(self, bbox: np.ndarray) -> None:
+    def __init__(self, bbox: np.ndarray, score: float = 0.0) -> None:
         kf = KalmanFilter(dim_x=7, dim_z=4)
         kf.F = np.eye(7)
         kf.F[0, 4] = kf.F[1, 5] = kf.F[2, 6] = 1.0
@@ -54,6 +54,7 @@ class _KalmanTrack:
         self.hit_streak = 1
         self.age = 0
         self.time_since_update = 0
+        self.last_score: float = score
 
     def predict(self) -> np.ndarray:
         if float(self.kf.x[6, 0]) + float(self.kf.x[2, 0]) <= 0:
@@ -115,7 +116,7 @@ class Sort:
 
         # Step 4 — spawn new tracks for unmatched detections
         for d_idx in unmatched_dets:
-            self._tracks.append(_KalmanTrack(dets[d_idx, :4]))
+            self._tracks.append(_KalmanTrack(dets[d_idx, :4], float(dets[d_idx, 4])))
 
         # Step 5 — collect output and prune dead tracks
         out: list[list[float]] = []
@@ -125,11 +126,12 @@ class Sort:
                 alive.append(t)
                 if t.hit_streak >= self.min_hits or self._frame <= self.min_hits:
                     box = t.state()
-                    # find confidence from the matched detection
-                    score = 0.0
+                    # use last known detection score; update if matched this frame
+                    score = t.last_score
                     for d_idx, t_idx in matched:
                         if self._tracks[t_idx] is t:
                             score = float(dets[d_idx, 4])
+                            t.last_score = score
                     out.append([*box.tolist(), score, float(t.id)])
         self._tracks = alive
 
