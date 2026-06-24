@@ -28,7 +28,9 @@ from services.yolo_model import (
     victim_state,
 )
 from services.detection_store import add_detections
-from services.tracker import Sort
+import warnings as _warnings
+_warnings.filterwarnings("ignore", category=FutureWarning, module="supervision")
+from supervision import ByteTrack as _SvByteTrack, Detections as SvDetections
 from routers.logs import append_log
 
 logger = logging.getLogger("rescueeye.detect")
@@ -42,14 +44,23 @@ NTFY_TOPIC           = os.getenv("NTFY_TOPIC", "rescueeye-alerts")
 NTFY_MIN_CONF        = float(os.getenv("NTFY_MIN_CONF", "0.10"))
 GRID_COOLDOWN_S      = 10.0
 NTFY_COOLDOWN_S      = 30.0
+SAHI_ENABLED         = os.getenv("SAHI_ENABLED", "true").lower() == "true"
+SAHI_TILES           = int(os.getenv("SAHI_TILES", "2"))      # NxN grid (2→4 tiles, 3→9 tiles)
+SAHI_SKIP_CONF       = float(os.getenv("SAHI_SKIP_CONF", "0.65"))  # skip tiles if full-frame already this confident
 
 _grid_cooldown: dict[tuple[int, int], float] = {}
 _grid_lock = asyncio.Lock()
 _ntfy_last_sent: float = 0.0
 _ntfy_lock = asyncio.Lock()
 
-# SORT tracker — persists across requests, maintains Kalman state per person
-_tracker = Sort(max_age=4, min_hits=1, iou_threshold=0.20)
+# ByteTrack — two-stage association for better occlusion handling than SORT
+_tracker = _SvByteTrack(
+    track_activation_threshold=0.25,
+    lost_track_buffer=30,
+    minimum_matching_threshold=0.8,
+    frame_rate=8,
+)
+
 
 
 def _bbox_to_grid(bbox: dict, cols: int = 8, rows: int = 6) -> tuple[int, int]:
@@ -242,6 +253,22 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float = 0.45) -> lis
     return keep
 
 
+def _wbf_merge(boxes: np.ndarray, scores: np.ndarray,
+               fw: int, fh: int, iou_thresh: float = 0.55) -> tuple[np.ndarray, np.ndarray]:
+    """Weighted Box Fusion — averages overlapping SAHI tile boxes weighted by confidence."""
+    if len(boxes) == 0:
+        return boxes, scores
+    from ensemble_boxes import weighted_boxes_fusion
+    norm = np.array([[fw, fh, fw, fh]], dtype=np.float32)
+    norm_boxes = (boxes / norm).clip(0.0, 1.0).tolist()
+    fused_boxes, fused_scores, _ = weighted_boxes_fusion(
+        [norm_boxes], [scores.tolist()], [[0] * len(scores)],
+        iou_thr=iou_thresh, skip_box_thr=CONFIDENCE_THRESHOLD,
+    )
+    out_boxes = np.array(fused_boxes, dtype=np.float32) * norm
+    return out_boxes, np.array(fused_scores, dtype=np.float32)
+
+
 def _run_victim_ort(frame: np.ndarray) -> tuple[list[dict], float]:
     """GPU inference via DirectML ONNX Runtime (bypasses PyTorch entirely)."""
     sess = get_victim_ort_session()
@@ -294,9 +321,97 @@ def _run_victim_ort(frame: np.ndarray) -> tuple[list[dict], float]:
     return detections, round(elapsed_ms, 1)
 
 
+def _run_victim_ort_sahi(frame: np.ndarray) -> tuple[list[dict], float]:
+    """
+    SAHI (Slicing Aided Hyper Inference):
+    - Pass 1: full frame letterboxed to 1280 (high-res global pass)
+    - Pass 2…N: NxN overlapping tiles each letterboxed to 640 (zoom-in pass)
+    All detections merged then NMS'd together. Catches tiny people that the
+    full-frame pass misses at altitude.
+    """
+    sess = get_victim_ort_session()
+    t0   = time.perf_counter()
+    fh, fw = frame.shape[:2]
+    all_boxes:  list[list[float]] = []
+    all_scores: list[float]       = []
+
+    def _infer_tile(tile: np.ndarray, off_x: int, off_y: int, target: int) -> None:
+        padded, scale, pad_x, pad_y = _letterbox(tile, target)
+        blob = padded.astype(np.float32) / 255.0
+        blob = blob.transpose(2, 0, 1)[np.newaxis]
+        raw  = sess.run(None, {sess.get_inputs()[0].name: blob})[0][0]  # [5, N]
+        cx, cy, bw_, bh_, conf = raw[0], raw[1], raw[2], raw[3], raw[4]
+        mask = conf >= CONFIDENCE_THRESHOLD
+        if not mask.any():
+            return
+        cx, cy, bw_, bh_, conf = cx[mask], cy[mask], bw_[mask], bh_[mask], conf[mask]
+        x1 = np.clip(((cx - bw_ / 2) - pad_x) / scale + off_x, 0, fw)
+        y1 = np.clip(((cy - bh_ / 2) - pad_y) / scale + off_y, 0, fh)
+        x2 = np.clip(((cx + bw_ / 2) - pad_x) / scale + off_x, 0, fw)
+        y2 = np.clip(((cy + bh_ / 2) - pad_y) / scale + off_y, 0, fh)
+        for i in range(len(conf)):
+            if x2[i] > x1[i] and y2[i] > y1[i]:
+                all_boxes.append([float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i])])
+                all_scores.append(float(conf[i]))
+
+    # Determine model's fixed input size from the session
+    input_shape = sess.get_inputs()[0].shape   # e.g. [1, 3, 1280, 1280]
+    model_size  = int(input_shape[2]) if len(input_shape) == 4 and isinstance(input_shape[2], int) else 1280
+
+    # Pass 1 — full frame (global context)
+    _infer_tile(frame, 0, 0, model_size)
+
+    # Adaptive early-exit: if full-frame already found a confident detection,
+    # tiles won't add much — skip them to save ~800ms
+    if all_scores and max(all_scores) >= SAHI_SKIP_CONF:
+        logger.info(f"[ort-sahi] skipping tiles — full-frame conf={max(all_scores):.2f} >= {SAHI_SKIP_CONF}")
+    else:
+        # Pass 2…N — NxN tile grid with 25% overlap (sequential — DirectML is single-threaded)
+        n      = SAHI_TILES
+        tile_w = fw // n
+        tile_h = fh // n
+        ovl_x  = int(tile_w * 0.25)
+        ovl_y  = int(tile_h * 0.25)
+        for row in range(n):
+            for col in range(n):
+                tx1 = max(0,  col * tile_w - ovl_x)
+                ty1 = max(0,  row * tile_h - ovl_y)
+                tx2 = min(fw, (col + 1) * tile_w + ovl_x)
+                ty2 = min(fh, (row + 1) * tile_h + ovl_y)
+                _infer_tile(frame[ty1:ty2, tx1:tx2], tx1, ty1, model_size)
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+
+    if not all_boxes:
+        return [], round(elapsed_ms, 1)
+
+    boxes  = np.array(all_boxes,  dtype=np.float32)
+    scores = np.array(all_scores, dtype=np.float32)
+    boxes, scores = _wbf_merge(boxes, scores, fw, fh, iou_thresh=0.55)
+
+    detections: list[dict] = []
+    for i in range(len(boxes)):
+        x1, y1, x2, y2 = boxes[i]
+        if x2 <= x1 or y2 <= y1:
+            continue
+        detections.append({
+            "class":      "person",
+            "confidence": round(float(scores[i]), 3),
+            "bbox":       {"x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1)},
+        })
+
+    logger.info(
+        f"[ort-sahi] tiles={n}x{n} pre_wbf={len(all_boxes)} "
+        f"post_wbf={len(detections)} inference={elapsed_ms:.0f}ms"
+    )
+    return detections, round(elapsed_ms, 1)
+
+
 def _run_victim(frame: np.ndarray) -> tuple[list[dict], float]:
-    # Prefer DirectML ONNX session (GPU, no PyTorch)
+    # Prefer SAHI + DirectML when ORT session available and SAHI is enabled
     if get_victim_ort_session() is not None:
+        if SAHI_ENABLED:
+            return _run_victim_ort_sahi(frame)
         return _run_victim_ort(frame)
 
     model  = get_victim_model()
@@ -372,32 +487,38 @@ async def detect_objects(payload: dict = Body(...)):
         display_frame            = frame
         detections, inference_ms = _run_victim(frame)
 
-    # ── SORT tracking — assign persistent IDs via Kalman filter ─────────────
+    # ── ByteTrack — two-stage association, handles occlusion better than SORT ─
+    det_class = "life_sign" if mode == "thermal" else "person"
+    fh, fw = frame.shape[:2]
     if detections:
-        det_arr = np.array([
-            [d["bbox"]["x"], d["bbox"]["y"],
-             d["bbox"]["x"] + d["bbox"]["w"],
-             d["bbox"]["y"] + d["bbox"]["h"],
-             d["confidence"]]
-            for d in detections
-        ], dtype=np.float32)
-        tracked = _tracker.update(det_arr)  # [M, 6]: x1,y1,x2,y2,score,track_id
+        sv_dets = SvDetections(
+            xyxy=np.array([
+                [d["bbox"]["x"], d["bbox"]["y"],
+                 d["bbox"]["x"] + d["bbox"]["w"],
+                 d["bbox"]["y"] + d["bbox"]["h"]]
+                for d in detections
+            ], dtype=np.float32),
+            confidence=np.array([d["confidence"] for d in detections], dtype=np.float32),
+            class_id=np.zeros(len(detections), dtype=int),
+        )
+        tracked = _tracker.update_with_detections(sv_dets)
         detections = []
-        for row in tracked:
-            x1, y1, x2, y2, score, tid = row
-            fh, fw = frame.shape[:2]
+        for i in range(len(tracked)):
+            x1, y1, x2, y2 = tracked.xyxy[i]
+            score = float(tracked.confidence[i])
+            tid   = int(tracked.tracker_id[i])
             detections.append({
-                "class":      "person",
-                "confidence": round(float(score), 3),
-                "track_id":   int(tid),
-                "bbox":       {
+                "class":      det_class,
+                "confidence": round(score, 3),
+                "track_id":   tid,
+                "bbox": {
                     "x": max(0, int(x1)), "y": max(0, int(y1)),
                     "w": min(fw - max(0, int(x1)), int(x2 - x1)),
                     "h": min(fh - max(0, int(y1)), int(y2 - y1)),
                 },
             })
     else:
-        _tracker.update(np.empty((0, 5), dtype=np.float32))
+        _tracker.update_with_detections(SvDetections.empty())
 
     frame_id  = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()

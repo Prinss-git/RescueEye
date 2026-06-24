@@ -129,6 +129,7 @@ export default function Dashboard() {
   const overlayRef      = useRef<OverlayState>(null)
   type TrackEntry = { bbox: RawDet['bbox']; ts: number }
   const trackHistoryRef = useRef<Map<number, TrackEntry>>(new Map())
+  const detectRunning   = useRef(false)   // prevents overlapping detect requests
 
   useEffect(() => { forceModeRef.current = forceMode }, [forceMode])
 
@@ -238,15 +239,16 @@ export default function Dashboard() {
     if (!detecting) return
 
     async function runDetect() {
-      if (!detectingRef.current) return
+      if (!detectingRef.current || detectRunning.current) return
+      detectRunning.current = true
       const img    = imgRef.current
       const canvas = hiddenCanvas.current
-      if (!img || !canvas || !img.naturalWidth) return
+      if (!img || !canvas || !img.naturalWidth) { detectRunning.current = false; return }
       try {
         canvas.width  = img.naturalWidth
         canvas.height = img.naturalHeight
         const ctx = canvas.getContext('2d')
-        if (!ctx) return
+        if (!ctx) { detectRunning.current = false; return }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
         const b64 = canvas.toDataURL('image/jpeg', 0.85)
 
@@ -258,7 +260,7 @@ export default function Dashboard() {
             force_mode: forceModeRef.current === 'auto' ? null : forceModeRef.current,
           }),
         })
-        if (!res.ok || !detectingRef.current) return
+        if (!res.ok || !detectingRef.current) { detectRunning.current = false; return }
         const data: DetectResponse = await res.json()
 
         const now = Date.now()
@@ -303,6 +305,7 @@ export default function Dashboard() {
           })
         }
       } catch { /* API offline */ }
+      finally { detectRunning.current = false }
     }
 
     const t = setInterval(runDetect, DETECT_INTERVAL_MS)

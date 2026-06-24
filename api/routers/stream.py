@@ -41,14 +41,14 @@ def _encode_pil(img: Image.Image, quality: int = 75) -> bytes:
     return buf.getvalue()
 
 
-def _downscale_jpeg(jpeg: bytes, w: int = 640, h: int = 480) -> bytes:
+def _downscale_jpeg(jpeg: bytes, w: int = 1280, h: int = 720) -> bytes:
     buf = io.BytesIO()
-    Image.open(io.BytesIO(jpeg)).resize((w, h), Image.BILINEAR).save(buf, format="JPEG", quality=70)
+    Image.open(io.BytesIO(jpeg)).resize((w, h), Image.BILINEAR).save(buf, format="JPEG", quality=78)
     return buf.getvalue()
 
 
 # ── Synthetic fallback frame ──────────────────────────────────────────────────
-def _synthetic_frame(tick: int, width: int = 640, height: int = 480) -> bytes:
+def _synthetic_frame(tick: int, width: int = 1280, height: int = 720) -> bytes:
     img_array = np.zeros((height, width, 3), dtype=np.uint8)
     for x in range(0, width, 40):
         img_array[:, x] = [0, 25, 35]
