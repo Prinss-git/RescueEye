@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { LogOut } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const ROLE_LABELS: Record<string, string> = {
-  incident_commander: 'INC. COMMANDER',
-  drone_operator:     'DRONE OPERATOR',
-  coordinator:        'COORDINATOR',
+  incident_commander: 'Incident Commander',
+  drone_operator:      'Drone Operator',
+  coordinator:         'Coordinator',
+  sar_responder:       'Search & Rescue',
+  ems_responder:       'Emergency Medical',
+  system_admin:        'System Admin',
+  agency_admin:        'Agency Admin',
 }
 
 export default function Navbar() {
@@ -38,59 +43,38 @@ export default function Navbar() {
     navigate('/login')
   }
 
-  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `font-mono text-xs tracking-widest px-4 py-2 rounded transition-colors ${
-      isActive
-        ? 'bg-cyan/20 text-cyan border border-cyan/40'
-        : 'text-white/60 hover:text-cyan hover:bg-cyan/10'
-    }`
-
   return (
-    <header
-      className="flex items-center justify-between px-4 py-2 border-b border-cyan/20 bg-panel"
-      style={{ boxShadow: '0 2px 12px rgba(0,212,255,0.15)' }}
-    >
+    <header className="flex items-center justify-between px-5 h-14 flex-shrink-0 border-b border-slate-200 bg-surface">
       {/* Logo */}
       <div className="flex items-center gap-3">
-        <div className="w-7 h-7 rounded-full border-2 border-cyan flex items-center justify-center shadow-cyan">
-          <span className="text-cyan font-mono font-bold text-xs">RE</span>
+        <div className="w-7 h-7 rounded-full border-2 border-accent flex items-center justify-center">
+          <span className="text-accent font-semibold text-xs">RE</span>
         </div>
-        <span className="font-mono font-bold text-cyan tracking-widest text-sm">RESCUEEYE</span>
-        <span className="text-white/20 font-mono text-xs ml-2 border border-white/10 px-2 py-0.5 rounded">
-          CMD CENTER
-        </span>
+        <span className="font-semibold text-slate-800 tracking-tight text-sm">RescueEye</span>
         {drillActive && (
-          <span className="font-mono text-xs px-2 py-0.5 rounded border border-orange-500/50 bg-orange-500/10 text-orange-300 animate-pulse">
-            ● DRILL ACTIVE
+          <span className="badge border-amber-200 bg-amber-50 text-amber-700">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> Drill Active
           </span>
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className="flex items-center gap-2">
-        <NavLink to="/dashboard"    className={navLinkClass}>LIVE FEED</NavLink>
-        <NavLink to="/map"          className={navLinkClass}>DAMAGE MAP</NavLink>
-        <NavLink to="/coordination" className={navLinkClass}>COORDINATION</NavLink>
-        <NavLink to="/evaluation"   className={navLinkClass}>EVALUATION</NavLink>
-      </nav>
-
       {/* User info */}
       <div className="flex items-center gap-4">
-        <div className="text-right">
-          <p className="text-xs font-mono text-white/80">{user?.displayName?.toUpperCase()}</p>
-          <p className="text-xs font-mono text-cyan/70">
-            {user?.role ? ROLE_LABELS[user.role] : ''}
-          </p>
+        <div className="text-right hidden sm:block">
+          <p className="text-xs font-medium text-slate-700">{user?.displayName}</p>
+          <p className="text-xs text-accent">{user?.role ? ROLE_LABELS[user.role] : ''}</p>
         </div>
-        <div className="text-right border-l border-white/10 pl-4">
-          <p className="font-mono text-xs text-white/80 tabular-nums">
+        <div className="text-right border-l border-slate-200 pl-4 hidden md:block">
+          <p className="text-xs font-mono text-slate-600 tabular-nums">
             {now.toLocaleTimeString('en-PH', { hour12: false })}
           </p>
-          <p className="font-mono text-[10px] text-white/40">
-            {now.toLocaleDateString('en-PH', { month: 'short', day: '2-digit', year: 'numeric' }).toUpperCase()}
+          <p className="text-[10px] text-slate-400">
+            {now.toLocaleDateString('en-PH', { month: 'short', day: '2-digit', year: 'numeric' })}
           </p>
         </div>
-        <button onClick={handleLogout} className="btn-ghost text-xs">LOGOUT</button>
+        <button onClick={handleLogout} className="btn-ghost text-xs flex items-center gap-1.5">
+          <LogOut size={14} /> Logout
+        </button>
       </div>
     </header>
   )

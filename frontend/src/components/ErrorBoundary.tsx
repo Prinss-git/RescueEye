@@ -20,15 +20,15 @@ export default class ErrorBoundary extends Component<Props, State> {
       <div className="h-full flex flex-col items-center justify-center gap-4">
         <div className="panel p-8 max-w-md text-center space-y-4">
           <div className="w-12 h-12 rounded-full border-2 border-alert mx-auto flex items-center justify-center">
-            <span className="text-alert font-mono font-bold">!</span>
+            <span className="text-alert font-bold">!</span>
           </div>
-          <p className="font-mono text-sm text-alert tracking-widest">SYSTEM ERROR</p>
-          <p className="font-mono text-xs text-white/50">Contact Admin — {this.state.message}</p>
+          <p className="text-sm font-semibold text-alert">System Error</p>
+          <p className="text-xs text-slate-500">Contact admin — {this.state.message}</p>
           <button
             className="btn-primary text-xs"
             onClick={() => this.setState({ hasError: false, message: '' })}
           >
-            RETRY
+            Retry
           </button>
         </div>
       </div>

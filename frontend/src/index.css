@@ -4,17 +4,17 @@
 
 @layer base {
   html, body, #root {
-    @apply h-full text-white font-sans;
-    background: #070b14;
+    @apply h-full text-slate-800 font-sans;
+    background: #f7f8fa;
     min-width: 1280px;
   }
 
   * { @apply box-border; }
 
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.2); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.4); }
+  ::-webkit-scrollbar-thumb { background: rgba(15,23,42,0.15); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(15,23,42,0.28); }
 }
 
 @keyframes pulse {
@@ -23,20 +23,25 @@
 }
 
 @layer components {
-  /* Legacy classes kept for compatibility */
   .panel {
-    @apply bg-panel border border-cyan/30 rounded-lg shadow-cyan;
+    @apply bg-surface border border-slate-200 rounded-lg shadow-card;
   }
   .panel-header {
-    @apply text-xs font-mono font-bold tracking-widest text-cyan uppercase px-4 py-2 border-b border-cyan/20;
+    @apply text-xs font-semibold tracking-wide text-slate-500 uppercase px-4 py-2.5 border-b border-slate-200;
   }
   .btn-primary {
-    @apply bg-cyan text-navy font-bold font-mono tracking-wider px-4 py-2 rounded hover:bg-cyan-dim transition-colors text-sm;
+    @apply bg-accent text-white font-medium px-4 py-2 rounded-md hover:bg-accent-dim transition-colors text-sm shadow-sm;
   }
   .btn-ghost {
-    @apply border border-cyan/40 text-cyan font-mono tracking-wider px-4 py-2 rounded hover:bg-cyan/10 transition-colors text-sm;
+    @apply border border-slate-300 text-slate-700 font-medium px-4 py-2 rounded-md hover:bg-slate-50 hover:border-slate-400 transition-colors text-sm;
+  }
+  .btn-danger {
+    @apply border border-red-200 text-red-600 font-medium px-4 py-2 rounded-md hover:bg-red-50 transition-colors text-sm;
   }
   .input-field {
-    @apply bg-panel-light border border-cyan/30 rounded px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-cyan text-sm w-full;
+    @apply bg-white border border-slate-300 rounded-md px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent text-sm w-full;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border;
   }
 }

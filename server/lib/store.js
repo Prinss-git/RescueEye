@@ -29,6 +29,10 @@ const incidents = [];
 
 const messages = [];
 
+const agencies = [];
+
+const users = [];
+
 // Active drill session (null if no drill running)
 let activeDrill = null;
 let drillInterval = null;
@@ -154,6 +158,89 @@ function addMessage(data) {
   return msg;
 }
 
+// ── Agencies ──────────────────────────────────────────────────────────────────
+
+function getAgencies() {
+  return agencies;
+}
+
+function getAgencyById(id) {
+  return agencies.find(a => a.id === id) || null;
+}
+
+function createAgency(data) {
+  const agency = {
+    id:                 `AGCY-${Date.now()}`,
+    name:                data.name,
+    subscriptionStatus:  data.subscriptionStatus || 'ACTIVE',
+    createdBy:           data.createdBy,
+    createdAt:           new Date().toISOString(),
+  };
+  agencies.push(agency);
+  _syncAgency(agency);
+  return agency;
+}
+
+function setAgencySubscriptionStatus(id, status) {
+  const agency = agencies.find(a => a.id === id);
+  if (!agency) return null;
+  agency.subscriptionStatus = status;
+  agency.updatedAt = new Date().toISOString();
+  _syncAgency(agency);
+  return agency;
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+
+function getUsers(filter = {}) {
+  let list = [...users];
+  if (filter.agencyId) list = list.filter(u => u.agencyId === filter.agencyId);
+  if (filter.role)     list = list.filter(u => u.role === filter.role);
+  return list;
+}
+
+function getUserByEmail(email) {
+  return users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+}
+
+function getUserById(uid) {
+  return users.find(u => u.uid === uid) || null;
+}
+
+function createUser(data) {
+  const user = {
+    uid:          `U-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    email:        data.email,
+    displayName:  data.displayName,
+    role:         data.role,
+    organization: data.organization || null,
+    agencyId:     data.agencyId || null,
+    passwordHash: data.passwordHash,
+    active:       true,
+    createdAt:    new Date().toISOString(),
+    lastLogin:    null,
+  };
+  users.push(user);
+  _syncUser(user);
+  return user;
+}
+
+function touchUserLogin(uid) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  user.lastLogin = new Date().toISOString();
+  _syncUser(user);
+  return user;
+}
+
+function setUserActive(uid, active) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  user.active = active;
+  _syncUser(user);
+  return user;
+}
+
 // ── Drill ─────────────────────────────────────────────────────────────────────
 
 const DRILL_INCIDENT_TYPES = ['VICTIM_DETECTED', 'FLOOD', 'FIRE', 'STRUCTURAL'];
@@ -270,6 +357,24 @@ async function _syncMessage(msg) {
   }
 }
 
+async function _syncAgency(agency) {
+  if (!_db) return;
+  try {
+    await _db.collection('agencies').doc(agency.id).set(agency, { merge: true });
+  } catch (e) {
+    console.warn('[store] Firestore agency sync failed:', e.message);
+  }
+}
+
+async function _syncUser(user) {
+  if (!_db) return;
+  try {
+    await _db.collection('users').doc(user.uid).set(user, { merge: true });
+  } catch (e) {
+    console.warn('[store] Firestore user sync failed:', e.message);
+  }
+}
+
 module.exports = {
   setDb,
   getDb,
@@ -283,6 +388,16 @@ module.exports = {
   resolveIncident,
   getMessages,
   addMessage,
+  getAgencies,
+  getAgencyById,
+  createAgency,
+  setAgencySubscriptionStatus,
+  getUsers,
+  getUserByEmail,
+  getUserById,
+  createUser,
+  touchUserLogin,
+  setUserActive,
   startDrill,
   stopDrill,
   getDrillStatus,

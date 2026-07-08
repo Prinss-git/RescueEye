@@ -3,12 +3,16 @@ import React, { createContext, useContext, useState, useCallback } from 'react'
 interface User {
   uid: string
   email: string
-  role: 'incident_commander' | 'drone_operator' | 'coordinator'
+  role: 'incident_commander' | 'drone_operator' | 'coordinator' | 'sar_responder' | 'ems_responder'
+      | 'system_admin' | 'agency_admin'
   displayName: string
+  organization?: string
+  agencyId?: string | null
 }
 
 interface AuthContextValue {
   user: User | null
+  token: string | null
   login: (email: string, password: string) => Promise<void>
   logout: () => void
 }
@@ -20,26 +24,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const stored = sessionStorage.getItem('rescueeye_user')
     return stored ? (JSON.parse(stored) as User) : null
   })
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('rescueeye_token'))
 
-  const login = useCallback(async (email: string, _password: string) => {
-    // Phase 1 stub — replace with real Firebase call in Phase 2
-    const mockUser: User = {
-      uid: 'mock-uid-001',
-      email,
-      role: 'incident_commander',
-      displayName: email.split('@')[0],
-    }
-    sessionStorage.setItem('rescueeye_user', JSON.stringify(mockUser))
-    setUser(mockUser)
+  const login = useCallback(async (email: string, password: string) => {
+    const res = await fetch('/server/auth/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ email, password }),
+    })
+    if (!res.ok) throw new Error('Invalid credentials')
+    const data = await res.json()
+    sessionStorage.setItem('rescueeye_user', JSON.stringify(data.user))
+    sessionStorage.setItem('rescueeye_token', data.token)
+    setUser(data.user)
+    setToken(data.token)
   }, [])
 
   const logout = useCallback(() => {
+    const storedToken = sessionStorage.getItem('rescueeye_token')
+    fetch('/server/auth/logout', {
+      method:  'POST',
+      headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : undefined,
+    }).catch(() => {})
     sessionStorage.removeItem('rescueeye_user')
+    sessionStorage.removeItem('rescueeye_token')
     setUser(null)
+    setToken(null)
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, token, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

@@ -45,14 +45,14 @@ interface EvalReport {
 
 function MetricRow({ label, value, pass }: { label: string; value: string; pass?: boolean }) {
   return (
-    <tr className="border-b border-white/5">
-      <td className="py-2 pr-4 font-mono text-xs text-white/50">{label}</td>
-      <td className={`py-2 font-mono text-xs font-bold ${
-        pass === true ? 'text-green-300' : pass === false ? 'text-red-400' : 'text-white'
+    <tr className="border-b border-slate-100 last:border-0">
+      <td className="py-2 pr-4 text-xs text-slate-500">{label}</td>
+      <td className={`py-2 font-mono text-xs font-semibold ${
+        pass === true ? 'text-green-700' : pass === false ? 'text-red-600' : 'text-slate-800'
       }`}>
         {value}
-        {pass === true  && <span className="ml-2 text-green-300">✓</span>}
-        {pass === false && <span className="ml-2 text-red-400">✗</span>}
+        {pass === true  && <span className="ml-2 text-green-700">✓</span>}
+        {pass === false && <span className="ml-2 text-red-600">✗</span>}
       </td>
     </tr>
   )
@@ -60,9 +60,10 @@ function MetricRow({ label, value, pass }: { label: string; value: string; pass?
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="panel p-5 space-y-3">
-      <h2 className="font-mono text-xs tracking-widest text-cyan border-b border-cyan/20 pb-2">{title}</h2>
-      <table className="w-full">{children}</table>
+    <div className="panel overflow-hidden">
+      <h2 className="panel-header">{title}</h2>
+      <table className="w-full [&_td]:px-5">{children}</table>
+      <div className="pb-2" />
     </div>
   )
 }
@@ -91,7 +92,7 @@ export default function EvaluationReport() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <p className="font-mono text-xs text-white/40 animate-pulse">LOADING EVALUATION REPORT...</p>
+        <p className="text-sm text-slate-400 animate-pulse">Loading evaluation report...</p>
       </div>
     )
   }
@@ -99,7 +100,7 @@ export default function EvaluationReport() {
   if (error) {
     return (
       <div className="h-full flex items-center justify-center">
-        <p className="font-mono text-xs text-alert">{error}</p>
+        <p className="text-sm text-alert">{error}</p>
       </div>
     )
   }
@@ -107,7 +108,7 @@ export default function EvaluationReport() {
   if (!report || report.type === 'empty') {
     return (
       <div className="h-full flex items-center justify-center">
-        <p className="font-mono text-xs text-white/40">{report?.message ?? 'No report available.'}</p>
+        <p className="text-sm text-slate-400">{report?.message ?? 'No report available.'}</p>
       </div>
     )
   }
@@ -122,8 +123,8 @@ export default function EvaluationReport() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-mono text-sm font-bold text-cyan tracking-widest">EVALUATION REPORT</h1>
-          <p className="font-mono text-xs text-white/40 mt-1">
+          <h1 className="text-lg font-semibold text-slate-800">Evaluation Report</h1>
+          <p className="text-sm text-slate-400 mt-1">
             {report.type === 'drill_session' ? 'Drill Session' : 'AI Model Evaluation'}
             {report.sessionId && ` · ${report.sessionId}`}
             {report.startedAt && ` · ${new Date(report.startedAt).toLocaleString()}`}
@@ -133,13 +134,13 @@ export default function EvaluationReport() {
           onClick={() => window.print()}
           className="btn-primary text-xs"
         >
-          EXPORT PDF
+          Export PDF
         </button>
       </div>
 
       {/* Drill session metrics */}
       {dr && (
-        <Section title="DRILL SESSION METRICS">
+        <Section title="Drill Session Metrics">
           <tbody>
             <MetricRow label="Incidents Generated"  value={String(dr.incidentCount)} />
             <MetricRow label="Messages Sent"        value={String(dr.messageCount)} />
@@ -155,7 +156,7 @@ export default function EvaluationReport() {
 
       {/* Victim detection */}
       {v && Object.keys(v).length > 0 && (
-        <Section title="VICTIM DETECTION — YOLOv8">
+        <Section title="Victim Detection — YOLOv8">
           <tbody>
             <MetricRow label="mAP@0.5"            value={v.map50           != null ? v.map50.toFixed(4)           : '—'} pass={v.map50 != null ? v.map50 >= 0.70 : undefined} />
             <MetricRow label="mAP@0.5:0.95"       value={v.map50_95        != null ? v.map50_95.toFixed(4)        : '—'} />
@@ -170,7 +171,7 @@ export default function EvaluationReport() {
 
       {/* Damage classification */}
       {d && Object.keys(d).length > 0 && (
-        <Section title="DAMAGE CLASSIFICATION — YOLOv8-CLS">
+        <Section title="Damage Classification — YOLOv8-CLS">
           <tbody>
             <MetricRow label="Top-1 Accuracy"     value={d.accuracy_top1   != null ? d.accuracy_top1.toFixed(4)  : '—'} pass={d.accuracy_top1 != null ? d.accuracy_top1 >= 0.75 : undefined} />
             <MetricRow label="Top-5 Accuracy"     value={d.accuracy_top5   != null ? d.accuracy_top5.toFixed(4)  : '—'} />
@@ -182,7 +183,7 @@ export default function EvaluationReport() {
 
       {/* Per-class accuracy */}
       {d?.per_class_accuracy && Object.keys(d.per_class_accuracy).length > 0 && (
-        <Section title="DAMAGE — PER-CLASS ACCURACY">
+        <Section title="Damage — Per-Class Accuracy">
           <tbody>
             {Object.entries(d.per_class_accuracy).map(([cls, acc]) => (
               <MetricRow key={cls} label={cls} value={(acc as number).toFixed(4)} pass={(acc as number) >= 0.75} />
@@ -193,18 +194,18 @@ export default function EvaluationReport() {
 
       {/* Latency assertion */}
       {la && (
-        <Section title="LATENCY ASSERTION — OBJECTIVE 6">
+        <Section title="Latency Assertion — Objective 6">
           <tbody>
             <MetricRow label="Victim Detection Avg"       value={`${la.victim_avg_ms} ms`} />
             <MetricRow label="Damage Classification Avg"  value={`${la.damage_avg_ms} ms`} />
             <MetricRow label="Combined"                   value={`${la.combined_ms} ms`} />
             <MetricRow label="Threshold"                  value={`${la.threshold_ms} ms`} />
-            <MetricRow label="Result"                     value={la.passed ? 'PASS' : 'FAIL'} pass={la.passed} />
+            <MetricRow label="Result"                     value={la.passed ? 'Pass' : 'Fail'} pass={la.passed} />
           </tbody>
         </Section>
       )}
 
-      <p className="font-mono text-xs text-white/20 text-center pb-4">
+      <p className="text-xs text-slate-300 text-center pb-4">
         RescueEye — University of Cebu Banilad Campus · Generated {new Date().toLocaleString()}
       </p>
     </div>

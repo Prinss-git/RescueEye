@@ -3,12 +3,15 @@ const express = require('express');
 const cors    = require('cors');
 
 const store         = require('./lib/store');
+const { hashPassword } = require('./lib/authz');
 const authRoutes    = require('./routes/auth');
 const teamsRoutes   = require('./routes/teams');
 const messagesRoutes = require('./routes/messages');
 const incidentsRoutes = require('./routes/incidents');
 const drillRoutes   = require('./routes/drill');
 const evalRoutes    = require('./routes/evaluation');
+const adminRoutes   = require('./routes/admin');
+const agencyRoutes  = require('./routes/agency');
 
 // ── Firebase Admin SDK ────────────────────────────────────────────────────────
 let firebaseAdmin = null;
@@ -57,6 +60,26 @@ app.use('/messages',   messagesRoutes);
 app.use('/incidents',  incidentsRoutes);
 app.use('/drill',      drillRoutes);
 app.use('/evaluation', evalRoutes);
+app.use('/admin',      adminRoutes);
+app.use('/agency',     agencyRoutes);
+
+// Seed the first System Admin account — otherwise nobody could ever create
+// one through the app (System Admins are the ones who create Agency Admins).
+(async () => {
+  const email = 'sysadmin@rescueeye.ph';
+  if (!store.getUserByEmail(email)) {
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin12345';
+    store.createUser({
+      email,
+      displayName:  'RescueEye System Admin',
+      role:         'system_admin',
+      organization: 'RescueEye',
+      agencyId:     null,
+      passwordHash: await hashPassword(password),
+    });
+    console.log(`[bootstrap] System Admin ready — ${email} / (see BOOTSTRAP_ADMIN_PASSWORD)`);
+  }
+})();
 
 // Global error handler
 app.use((err, _req, res, _next) => {

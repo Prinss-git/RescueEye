@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, Popup, CircleMarker, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
+import { Crosshair } from 'lucide-react'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -42,10 +43,10 @@ const STATIC_INCIDENTS: Incident[] = [
 ]
 
 const TYPE_COLOR: Record<Exclude<DamageType, 'all'>, string> = {
-  victim_detected:   '#ff3b3b',
-  flood_damage:      '#00d4ff',
+  victim_detected:   '#dc2626',
+  flood_damage:      '#0e7490',
   structural_damage: '#f97316',
-  fire_damage:       '#ff7700',
+  fire_damage:       '#ea580c',
 }
 
 const TYPE_LABEL: Record<DamageType, string> = {
@@ -79,9 +80,9 @@ function RecenterButton() {
   return (
     <button
       onClick={() => map.setView([10.3157, 123.8854], 14)}
-      className="absolute top-3 right-3 z-[1000] font-mono text-xs px-3 py-1.5 rounded border border-cyan/40 bg-navy/90 text-cyan hover:bg-cyan/10 transition-colors"
+      className="absolute top-3 right-3 z-[1000] text-xs px-3 py-1.5 rounded-md border border-slate-200 bg-white/95 text-accent hover:bg-accent-tint transition-colors shadow-sm flex items-center gap-1.5"
     >
-      ⌖ RECENTER
+      <Crosshair size={13} /> Recenter
     </button>
   )
 }
@@ -168,11 +169,11 @@ export default function DamageMap() {
             <span className={`font-mono text-xs px-2 py-0.5 rounded border ${
               pollError
                 ? 'text-alert border-alert/40 bg-alert/10'
-                : 'text-green-400 border-green-400/30 bg-green-400/10'
+                : 'text-green-700 border-green-200 bg-green-50'
             }`}>
               {pollError ? 'LIVE OFF' : 'LIVE ON'}
             </span>
-            <span className="font-mono text-xs text-white/30 normal-case font-normal">
+            <span className="font-mono text-xs text-slate-900/30 normal-case font-normal">
               last: {lastPoll}
             </span>
           </div>
@@ -183,8 +184,8 @@ export default function DamageMap() {
                 onClick={() => setFilter(t)}
                 className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
                   filter === t
-                    ? 'bg-cyan/20 text-cyan border border-cyan/40'
-                    : 'text-white/40 hover:text-white/70'
+                    ? 'bg-accent/20 text-accent border border-accent/40'
+                    : 'text-slate-900/40 hover:text-slate-900/70'
                 }`}
               >
                 {TYPE_LABEL[t]}
@@ -197,7 +198,7 @@ export default function DamageMap() {
           <MapContainer
             center={[10.3157, 123.8854]}
             zoom={14}
-            style={{ height: '100%', width: '100%', background: '#0a0e1a' }}
+            style={{ height: '100%', width: '100%', background: '#e2e8f0' }}
           >
             <MapResizer />
             <RecenterButton />
@@ -229,7 +230,7 @@ export default function DamageMap() {
                       <strong>{inc.id}</strong><br />
                       {inc.label}<br />
                       <span style={{ color: '#888' }}>{inc.timestamp}</span>
-                      {isLive && <span style={{ color: '#00d4ff' }}> · LIVE</span>}
+                      {isLive && <span style={{ color: '#0e7490' }}> · LIVE</span>}
                     </div>
                   </Popup>
                 </CircleMarker>
@@ -253,18 +254,18 @@ export default function DamageMap() {
                     className={`w-3 h-3 rounded-full flex-shrink-0 ${t === 'victim_detected' ? 'animate-pulse' : ''}`}
                     style={{ background: TYPE_COLOR[t] }}
                   />
-                  <span className="font-mono text-xs text-white/70">{TYPE_LABEL[t]}</span>
+                  <span className="font-mono text-xs text-slate-900/70">{TYPE_LABEL[t]}</span>
                 </div>
                 <span className={`font-mono text-xs font-bold ${
-                  countByType[t] > 0 ? 'text-white' : 'text-white/20'
+                  countByType[t] > 0 ? 'text-slate-900' : 'text-slate-900/20'
                 }`}>
                   {countByType[t]}
                 </span>
               </div>
             ))}
-            <div className="border-t border-white/10 pt-2 mt-1 flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full border border-dashed border-cyan flex-shrink-0" />
-              <span className="font-mono text-xs text-white/40">Dashed = live detection</span>
+            <div className="border-t border-slate-900/10 pt-2 mt-1 flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full border border-dashed border-accent flex-shrink-0" />
+              <span className="font-mono text-xs text-slate-900/40">Dashed = live detection</span>
             </div>
           </div>
         </div>
@@ -272,13 +273,13 @@ export default function DamageMap() {
         {/* Stats */}
         <div className="panel p-3 flex gap-3">
           {[
-            { label: 'TOTAL', value: allIncidents.length, color: 'text-white' },
-            { label: 'LIVE',  value: liveIncidents.length, color: 'text-cyan' },
-            { label: 'SHOWN', value: visible.length, color: 'text-white/60' },
+            { label: 'TOTAL', value: allIncidents.length, color: 'text-slate-900' },
+            { label: 'LIVE',  value: liveIncidents.length, color: 'text-accent' },
+            { label: 'SHOWN', value: visible.length, color: 'text-slate-900/60' },
           ].map(({ label, value, color }) => (
             <div key={label} className="flex-1 text-center">
               <p className={`font-mono text-base font-bold ${color}`}>{value}</p>
-              <p className="font-mono text-xs text-white/30">{label}</p>
+              <p className="font-mono text-xs text-slate-900/30">{label}</p>
             </div>
           ))}
         </div>
@@ -288,7 +289,7 @@ export default function DamageMap() {
           <div className="panel-header">Incidents ({visible.length})</div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {visible.length === 0 && (
-              <p className="font-mono text-xs text-white/30 text-center mt-8">
+              <p className="font-mono text-xs text-slate-900/30 text-center mt-8">
                 — no active incidents detected —
               </p>
             )}
@@ -298,19 +299,19 @@ export default function DamageMap() {
                 onClick={() => setSelected(inc)}
                 className={`w-full text-left p-2 rounded border transition-colors ${
                   selected?.id === inc.id
-                    ? 'border-cyan/60 bg-cyan/10'
-                    : 'border-white/5 bg-panel-light hover:border-cyan/30'
+                    ? 'border-accent/60 bg-accent/10'
+                    : 'border-slate-900/5 bg-surface-alt hover:border-accent/30'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: TYPE_COLOR[inc.type] }} />
-                  <span className="font-mono text-xs font-bold text-white">{inc.id}</span>
+                  <span className="font-mono text-xs font-bold text-slate-900">{inc.id}</span>
                   {inc.source === 'live' && (
-                    <span className="font-mono text-xs text-cyan/60 border border-cyan/30 px-1 rounded">LIVE</span>
+                    <span className="font-mono text-xs text-accent/60 border border-accent/30 px-1 rounded">LIVE</span>
                   )}
-                  <span className="ml-auto font-mono text-xs text-white/30">{inc.timestamp}</span>
+                  <span className="ml-auto font-mono text-xs text-slate-900/30">{inc.timestamp}</span>
                 </div>
-                <p className="font-mono text-xs text-white/60 pl-4 truncate">{inc.label}</p>
+                <p className="font-mono text-xs text-slate-900/60 pl-4 truncate">{inc.label}</p>
               </button>
             ))}
           </div>
@@ -320,20 +321,20 @@ export default function DamageMap() {
         {selected && (
           <div className="panel p-4 flex-shrink-0">
             <div className="flex justify-between items-start mb-3">
-              <span className="font-mono text-xs font-bold text-cyan">{selected.id}</span>
-              <button onClick={() => setSelected(null)} className="text-white/30 hover:text-white font-mono text-xs">✕</button>
+              <span className="font-mono text-xs font-bold text-accent">{selected.id}</span>
+              <button onClick={() => setSelected(null)} className="text-slate-900/30 hover:text-slate-900 font-mono text-xs">✕</button>
             </div>
-            <p className="font-mono text-xs text-white/80 mb-2">{selected.label}</p>
+            <p className="font-mono text-xs text-slate-900/80 mb-2">{selected.label}</p>
             <div className="space-y-1">
               {[
                 ['TYPE',   TYPE_LABEL[selected.type].toUpperCase(), TYPE_COLOR[selected.type]],
-                ['CONF',   `${Math.round(selected.confidence * 100)}%`, '#ffffff'],
-                ['COORDS', `${selected.lat.toFixed(4)}, ${selected.lng.toFixed(4)}`, '#ffffff99'],
-                ['TIME',   selected.timestamp, '#ffffff'],
-                ['SOURCE', selected.source.toUpperCase(), selected.source === 'live' ? '#00d4ff' : '#ffffff60'],
+                ['CONF',   `${Math.round(selected.confidence * 100)}%`, '#1e293b'],
+                ['COORDS', `${selected.lat.toFixed(4)}, ${selected.lng.toFixed(4)}`, '#64748b'],
+                ['TIME',   selected.timestamp, '#1e293b'],
+                ['SOURCE', selected.source.toUpperCase(), selected.source === 'live' ? '#0e7490' : '#94a3b8'],
               ].map(([label, value, color]) => (
                 <div key={label} className="flex justify-between">
-                  <span className="font-mono text-xs text-white/40">{label}</span>
+                  <span className="font-mono text-xs text-slate-900/40">{label}</span>
                   <span className="font-mono text-xs font-bold" style={{ color }}>{value}</span>
                 </div>
               ))}
@@ -342,7 +343,7 @@ export default function DamageMap() {
               href="/coordination"
               className="btn-primary w-full text-xs mt-3 block text-center"
             >
-              DISPATCH TEAM →
+              Dispatch Team →
             </a>
           </div>
         )}

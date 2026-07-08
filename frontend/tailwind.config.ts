@@ -5,22 +5,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        navy: '#0a0e1a',
-        cyan: {
-          DEFAULT: '#00d4ff',
-          dim: '#0099bb',
+        bg:      '#f7f8fa',
+        surface: '#ffffff',
+        'surface-alt': '#f1f5f9',
+        accent: {
+          DEFAULT: '#0e7490',
+          dim: '#155e75',
+          tint: '#ecfeff',
         },
-        alert: '#ff3b3b',
-        panel: '#1a2035',
-        'panel-light': '#232b45',
+        alert: '#dc2626',
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Consolas', 'monospace'],
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        cyan: '0 0 8px 1px rgba(0, 212, 255, 0.35)',
-        'cyan-lg': '0 0 16px 2px rgba(0, 212, 255, 0.45)',
+        card: '0 1px 2px 0 rgba(15, 23, 42, 0.06), 0 1px 3px 0 rgba(15, 23, 42, 0.06)',
       },
     },
   },

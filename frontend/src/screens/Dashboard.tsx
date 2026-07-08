@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { Play, Square, Upload, CircleCheck } from 'lucide-react'
 import DetectionLog, { Detection } from '../components/DetectionLog'
 
 const API          = '/api'
@@ -15,20 +16,20 @@ const MODEL_POLL_MS       = 10000
 const BOX_FADE_MS         = 8000
 
 const DAMAGE_COLOR: Record<string, string> = {
-  flood_damage:      '#00d4ff',
-  fire_damage:       '#ff7700',
+  flood_damage:      '#0e7490',
+  fire_damage:       '#ea580c',
   structural_damage: '#f97316',
 }
 const DAMAGE_DISPLAY: Record<string, string> = {
-  flood_damage:      'FLOOD DAMAGE',
-  fire_damage:       'FIRE DAMAGE',
-  structural_damage: 'STRUCTURAL DMG',
+  flood_damage:      'Flood Damage',
+  fire_damage:       'Fire Damage',
+  structural_damage: 'Structural Damage',
 }
 
 const SEVERITY_COLOR: Record<string, string> = {
-  CRITICAL: '#ff3b3b',
-  MODERATE: '#f59e0b',
-  MINOR:    '#ffdc00',
+  CRITICAL: '#dc2626',
+  MODERATE: '#d97706',
+  MINOR:    '#ca8a04',
 }
 
 const DRONE_BRANDS = [
@@ -77,10 +78,10 @@ interface ModelsStatus {
 }
 
 const CLASS_COLOR: Record<string, string> = {
-  person:             '#ff3b3b',
-  life_sign:          '#ffdc00',
-  fire_damage:        '#ff7700',
-  flood_damage:       '#00d4ff',
+  person:             '#dc2626',
+  life_sign:          '#ca8a04',
+  fire_damage:        '#ea580c',
+  flood_damage:       '#0e7490',
   structural_damage:  '#f97316',
 }
 
@@ -104,7 +105,6 @@ export default function Dashboard() {
   const [forceMode, setForceMode]       = useState<'auto' | 'visual' | 'thermal'>('auto')
   const [brightness, setBrightness]     = useState<number | null>(null)
   const [latestFrame, setLatestFrame]   = useState<string | null>(null)
-  const [clock, setClock]               = useState('')
 
   const [damageLabel,   setDamageLabel]   = useState<{ label: string; confidence: number; severity?: string; suggested_action?: string } | null>(null)
   const [selectedDrone, setSelectedDrone] = useState('')
@@ -132,14 +132,6 @@ export default function Dashboard() {
   const detectRunning   = useRef(false)   // prevents overlapping detect requests
 
   useEffect(() => { forceModeRef.current = forceMode }, [forceMode])
-
-  // Clock
-  useEffect(() => {
-    function tick() { setClock(new Date().toLocaleTimeString('en-PH', { hour12: false })) }
-    tick()
-    const t = setInterval(tick, 1000)
-    return () => clearInterval(t)
-  }, [])
 
   // Elapsed timer
   useEffect(() => {
@@ -220,7 +212,7 @@ export default function Dashboard() {
                 const lx = x; const ly = y > 18/scale ? y - 18/scale : y + h + 2/scale
                 ctx.fillStyle = color
                 ctx.beginPath(); ctx.roundRect(lx, ly, tw + 8/scale, 16/scale, 3/scale); ctx.fill()
-                ctx.fillStyle = '#0a0e1a'; ctx.fillText(label, lx + 4/scale, ly + 12/scale)
+                ctx.fillStyle = '#ffffff'; ctx.fillText(label, lx + 4/scale, ly + 12/scale)
               }
               ctx.restore()
             }
@@ -400,106 +392,81 @@ export default function Dashboard() {
   }
 
   const feedColor =
-    feedStatus === 'ACTIVE'     ? '#22c55e' :
-    feedStatus === 'CONNECTING' ? '#f59e0b' : '#ff3b3b'
+    feedStatus === 'ACTIVE'     ? '#16a34a' :
+    feedStatus === 'CONNECTING' ? '#d97706' : '#dc2626'
 
   const latColor =
-    inferenceMs == null ? '#ffffff44' :
-    inferenceMs > 2000  ? '#ff3b3b'   :
-    inferenceMs > 500   ? '#f59e0b'   : '#22c55e'
+    inferenceMs == null ? '#94a3b8' :
+    inferenceMs > 2000  ? '#dc2626' :
+    inferenceMs > 500   ? '#d97706' : '#16a34a'
 
   return (
-    <div className="h-full flex flex-col overflow-hidden" style={{ background: '#070b14' }}>
+    <div className="h-full flex flex-col overflow-hidden bg-bg">
 
-      {/* ── App header ──────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2"
-        style={{ background: '#0d1220', borderBottom: '1px solid rgba(0,212,255,0.15)' }}>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded flex items-center justify-center"
-              style={{ background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.35)' }}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="8" r="2.5" fill="#00d4ff"/>
-                <path d="M8 1v3M8 12v3M1 8h3M12 8h3" stroke="#00d4ff" strokeWidth="1.5" strokeLinecap="round"/>
-                <path d="M3.5 3.5l2 2M10.5 10.5l2 2M10.5 3.5l-2 2M5.5 10.5l-2 2" stroke="#00d4ff44" strokeWidth="1" strokeLinecap="round"/>
-              </svg>
-            </div>
-            <div>
-              <div className="font-mono font-bold text-sm tracking-widest" style={{ color: '#00d4ff' }}>RESCUEEYE</div>
-              <div className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>PORTABLE SAR FIELD RESPONSE SYSTEM</div>
-            </div>
-          </div>
-          <div className="w-px h-8 mx-1" style={{ background: 'rgba(255,255,255,0.08)' }} />
-          <div>
-            <div className="font-mono text-[10px] font-bold tracking-wider" style={{ color: 'rgba(255,255,255,0.7)' }}>OPERATION ODETTE · CASUALTY DETECTION</div>
-            <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>CEBU PROVINCE, PHILIPPINES · DEPLOYABLE FIELD UNIT</div>
-          </div>
+      {/* ── Operation header ────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5 bg-surface border-b border-slate-200">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">Operation Odette · Casualty Detection</div>
+          <div className="text-xs text-slate-400">Cebu Province, Philippines · Deployable Field Unit</div>
         </div>
 
         <div className="flex items-center gap-4">
           {/* Feed pill */}
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full font-mono text-xs"
-            style={{ background: 'rgba(0,0,0,0.4)', border: `1px solid ${feedColor}44` }}>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-xs border" style={{ borderColor: feedColor + '55' }}>
             <span className="w-1.5 h-1.5 rounded-full"
-              style={{ background: feedColor, boxShadow: feedStatus === 'ACTIVE' ? `0 0 6px ${feedColor}` : 'none',
-                animation: feedStatus !== 'OFFLINE' ? 'pulse 2s infinite' : 'none' }} />
-            <span style={{ color: feedColor }} className="font-bold">{feedStatus}</span>
-            <span style={{ color: 'rgba(255,255,255,0.3)' }}>·</span>
-            <span style={{ color: 'rgba(255,255,255,0.5)' }} className="uppercase">{streamSource}</span>
+              style={{ background: feedColor, animation: feedStatus !== 'OFFLINE' ? 'pulse 2s infinite' : 'none' }} />
+            <span style={{ color: feedColor }} className="font-semibold">{feedStatus}</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-slate-500">{streamSource}</span>
           </div>
 
           {/* Metrics strip */}
           <div className="flex items-center gap-3">
-            <Metric label="ELAPSED" value={formatElapsed(elapsedSec)} />
-            <Metric label="FRAMES"  value={String(totalFrames)} />
-            <Metric label="CASUALTIES" value={String(detections.length)}
-              valueColor={detections.length > 0 ? '#ff3b3b' : undefined} />
+            <Metric label="Elapsed" value={formatElapsed(elapsedSec)} />
+            <Metric label="Frames"  value={String(totalFrames)} />
+            <Metric label="Casualties" value={String(detections.length)}
+              valueColor={detections.length > 0 ? '#dc2626' : undefined} />
             {inferenceMs !== null && (
-              <Metric label="AI LAT" value={`${Math.round(inferenceMs)}ms`} valueColor={latColor} />
+              <Metric label="AI Latency" value={`${Math.round(inferenceMs)}ms`} valueColor={latColor} />
             )}
           </div>
-
-          <div className="w-px h-6" style={{ background: 'rgba(255,255,255,0.08)' }} />
-          <div className="font-mono text-sm tabular-nums" style={{ color: 'rgba(255,255,255,0.6)' }}>{clock}</div>
         </div>
       </div>
 
       {/* ── Model status bar ────────────────────────────────────────────────── */}
       {modelsStatus && (
-        <div className="flex-shrink-0 flex items-center gap-3 px-4 py-1.5"
-          style={{ background: '#0a0f1c', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-          <span className="font-mono text-[9px] tracking-widest" style={{ color: 'rgba(255,255,255,0.2)' }}>MODELS</span>
-          <ModelChip label="CASUALTY DETECT" info={modelsStatus.victim_model}
+        <div className="flex-shrink-0 flex items-center gap-3 px-4 py-1.5 bg-slate-50 border-b border-slate-200">
+          <span className="text-[10px] font-medium tracking-wide text-slate-400 uppercase">Models</span>
+          <ModelChip label="Casualty Detect" info={modelsStatus.victim_model}
             metric={modelsStatus.victim_model.map50 != null ? `mAP ${modelsStatus.victim_model.map50.toFixed(3)}` : undefined} />
-          <ModelChip label="DAMAGE CLASS"    info={modelsStatus.damage_model}
-            metric={modelsStatus.damage_model.accuracy != null ? `ACC ${modelsStatus.damage_model.accuracy.toFixed(3)}` : undefined} />
-          <div className="ml-auto font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
-            YOLO11s · ONNX-DirectML · RTX 4050 · FIELD-DEPLOYABLE
+          <ModelChip label="Damage Class"    info={modelsStatus.damage_model}
+            metric={modelsStatus.damage_model.accuracy != null ? `Acc ${modelsStatus.damage_model.accuracy.toFixed(3)}` : undefined} />
+          <div className="ml-auto text-[10px] text-slate-400">
+            YOLO11s · ONNX-DirectML · RTX 4050 · Field-Deployable
           </div>
         </div>
       )}
 
       {/* ── 3-column body ───────────────────────────────────────────────────── */}
-      <div className="flex-1 grid gap-2 p-2 min-h-0 overflow-hidden"
-        style={{ gridTemplateColumns: '240px 1fr 280px' }}>
+      <div className="flex-1 grid gap-3 p-3 min-h-0 overflow-hidden"
+        style={{ gridTemplateColumns: '260px 1fr 300px' }}>
 
         {/* ── Left: controls ──────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-2 min-h-0 overflow-y-auto pr-0.5">
+        <div className="flex flex-col gap-3 min-h-0 overflow-y-auto pr-0.5">
 
           {/* Scan control */}
-          <SideSection title="CASUALTY SCAN">
+          <SideSection title="Casualty Scan">
             <button
               onClick={() => setDetecting((d) => !d)}
-              className="w-full font-mono font-bold text-xs py-2.5 rounded transition-all tracking-widest"
+              className="w-full font-medium text-sm py-2.5 rounded-md transition-all flex items-center justify-center gap-2"
               style={detecting
-                ? { background: 'rgba(255,59,59,0.1)', border: '1px solid rgba(255,59,59,0.5)', color: '#ff3b3b' }
-                : { background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.5)', color: '#00d4ff',
-                    boxShadow: '0 0 12px rgba(0,212,255,0.15)' }}>
-              {detecting ? '■  STOP SCAN' : '▶  BEGIN SCAN'}
+                ? { background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626' }
+                : { background: '#0e7490', border: '1px solid #0e7490', color: '#ffffff' }}>
+              {detecting ? <><Square size={14} /> Stop Scan</> : <><Play size={14} /> Begin Scan</>}
             </button>
-            <div className="grid grid-cols-2 gap-1.5 mt-1">
+            <div className="grid grid-cols-2 gap-1.5 mt-2">
               <GhostBtn onClick={() => { setDetections([]); setInferenceMs(null); setTotalFrames(0) }}>
-                CLEAR LOG
+                Clear Log
               </GhostBtn>
               <GhostBtn
                 disabled={detections.length === 0}
@@ -516,78 +483,75 @@ export default function Dashboard() {
                   a.download = `rescueeye_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`
                   a.click(); URL.revokeObjectURL(url)
                 }}>
-                EXPORT CSV
+                Export CSV
               </GhostBtn>
             </div>
           </SideSection>
 
           {/* Sensor mode */}
-          <SideSection title="SENSOR MODE">
-            <div className="grid grid-cols-3 gap-1 rounded overflow-hidden"
-              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.07)', padding: '3px' }}>
+          <SideSection title="Sensor Mode">
+            <div className="grid grid-cols-3 gap-1 rounded-md bg-slate-50 border border-slate-200 p-1">
               {(['auto', 'visual', 'thermal'] as const).map((m) => {
                 const active = forceMode === m
-                const accent = m === 'thermal' ? '#f59e0b' : m === 'visual' ? '#00d4ff' : '#ffffff'
+                const accent = m === 'thermal' ? '#d97706' : m === 'visual' ? '#0e7490' : '#334155'
                 return (
                   <button key={m} onClick={() => setForceMode(m)}
-                    className="py-1.5 rounded font-mono text-[10px] font-bold tracking-widest transition-all"
+                    className="py-1.5 rounded text-xs font-medium transition-all"
                     style={active
-                      ? { background: `${accent}18`, color: accent, border: `1px solid ${accent}55` }
-                      : { color: 'rgba(255,255,255,0.25)', border: '1px solid transparent' }}>
-                    {m === 'auto' ? 'AUTO' : m === 'visual' ? 'VISUAL' : 'THERM'}
+                      ? { background: '#ffffff', color: accent, border: `1px solid ${accent}55`, boxShadow: '0 1px 2px rgba(15,23,42,0.08)' }
+                      : { color: '#94a3b8', border: '1px solid transparent' }}>
+                    {m === 'auto' ? 'Auto' : m === 'visual' ? 'Visual' : 'Therm'}
                   </button>
                 )
               })}
             </div>
             {detecting && (
-              <div className="flex items-center gap-1.5 mt-1.5 px-2 py-1 rounded"
-                style={{ background: detectMode === 'thermal' ? 'rgba(245,158,11,0.08)' : 'rgba(0,212,255,0.06)',
-                  border: `1px solid ${detectMode === 'thermal' ? 'rgba(245,158,11,0.25)' : 'rgba(0,212,255,0.15)'}` }}>
+              <div className="flex items-center gap-1.5 mt-1.5 px-2 py-1 rounded-md"
+                style={{ background: detectMode === 'thermal' ? '#fffbeb' : '#ecfeff',
+                  border: `1px solid ${detectMode === 'thermal' ? '#fde68a' : '#a5f3fc'}` }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{
-                  background: detectMode === 'thermal' ? '#f59e0b' : '#00d4ff',
+                  background: detectMode === 'thermal' ? '#d97706' : '#0e7490',
                   animation: 'pulse 1.5s infinite',
                 }} />
-                <span className="font-mono text-[10px] font-bold tracking-wider"
-                  style={{ color: detectMode === 'thermal' ? '#f59e0b' : '#00d4ff' }}>
-                  {detectMode === 'thermal' ? 'THERMAL ACTIVE' : 'VISUAL ACTIVE'}
+                <span className="text-xs font-medium"
+                  style={{ color: detectMode === 'thermal' ? '#b45309' : '#0e7490' }}>
+                  {detectMode === 'thermal' ? 'Thermal Active' : 'Visual Active'}
                 </span>
               </div>
             )}
           </SideSection>
 
           {/* Platform telemetry */}
-          <SideSection title="FIELD UNIT">
+          <SideSection title="Field Unit">
             <div className="space-y-0">
               {([
-                ['UNIT ID',   'UAV-ALPHA-01', '#00d4ff'],
-                ['ALTITUDE',  '120 m AGL',    '#00d4ff'],
-                ['AIRSPEED',  '8.4 m/s',      '#00d4ff'],
-                ['BATTERY',   '74 %',         '#22c55e'],
-                ['SIGNAL',    'STRONG',       '#22c55e'],
-                ['GPS LOCK',  '14 SATS',      '#22c55e'],
+                ['Unit ID',   'UAV-ALPHA-01', '#0e7490'],
+                ['Altitude',  '120 m AGL',    '#0e7490'],
+                ['Airspeed',  '8.4 m/s',      '#0e7490'],
+                ['Battery',   '74 %',         '#16a34a'],
+                ['Signal',    'Strong',       '#16a34a'],
+                ['GPS Lock',  '14 sats',      '#16a34a'],
               ] as [string, string, string][]).map(([k, v, vc]) => (
-                <div key={k} className="flex items-center justify-between py-1.5"
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span className="font-mono text-[10px] tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>{k}</span>
-                  <span className="font-mono text-[10px] font-bold" style={{ color: vc }}>{v}</span>
+                <div key={k} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
+                  <span className="text-xs text-slate-500">{k}</span>
+                  <span className="text-xs font-mono font-medium" style={{ color: vc }}>{v}</span>
                 </div>
               ))}
             </div>
           </SideSection>
 
           {/* Drone source */}
-          <SideSection title="DRONE SOURCE">
+          <SideSection title="Drone Source">
             <div className="space-y-2">
               {/* Mode toggle */}
-              <div className="grid grid-cols-2 gap-1 p-0.5 rounded"
-                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="grid grid-cols-2 gap-1 p-0.5 rounded-md bg-slate-50 border border-slate-200">
                 {(['live', 'upload'] as const).map((m) => (
                   <button key={m} onClick={() => setSourceMode(m)}
-                    className="py-1 rounded font-mono text-[10px] font-bold tracking-widest transition-all"
+                    className="py-1 rounded text-xs font-medium transition-all flex items-center justify-center gap-1"
                     style={sourceMode === m
-                      ? { background: 'rgba(0,212,255,0.15)', color: '#00d4ff', border: '1px solid rgba(0,212,255,0.4)' }
-                      : { color: 'rgba(255,255,255,0.25)', border: '1px solid transparent' }}>
-                    {m === 'live' ? '▶ LIVE' : '↑ UPLOAD'}
+                      ? { background: '#ffffff', color: '#0e7490', border: '1px solid #a5f3fc', boxShadow: '0 1px 2px rgba(15,23,42,0.08)' }
+                      : { color: '#94a3b8', border: '1px solid transparent' }}>
+                    {m === 'live' ? <><Play size={11} /> Live</> : <><Upload size={11} /> Upload</>}
                   </button>
                 ))}
               </div>
@@ -601,21 +565,18 @@ export default function Dashboard() {
                       onKeyDown={(e) => { if (e.key === 'Enter' && sourceInput.trim()) applyDroneSource(sourceInput.trim()) }}
                       placeholder="rtsp://192.168.1.1/live"
                       spellCheck={false}
-                      className="flex-1 font-mono text-[10px] px-2 py-1.5 rounded min-w-0"
-                      style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.1)',
-                        color: 'rgba(255,255,255,0.8)', outline: 'none' }}
+                      className="input-field flex-1 text-xs py-1.5 min-w-0"
                     />
                     <button
                       onClick={() => sourceInput.trim() && applyDroneSource(sourceInput.trim())}
                       disabled={sourceSetting || !sourceInput.trim()}
-                      className="font-mono text-[10px] font-bold px-2 py-1 rounded tracking-wider disabled:opacity-30 transition-all"
-                      style={{ background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.4)', color: '#00d4ff' }}>
-                      {sourceSetting ? '…' : 'SET'}
+                      className="text-xs font-medium px-2 py-1 rounded-md disabled:opacity-30 transition-all"
+                      style={{ background: '#ecfeff', border: '1px solid #a5f3fc', color: '#0e7490' }}>
+                      {sourceSetting ? '…' : 'Set'}
                     </button>
                   </div>
                   <div className="space-y-1.5">
-                    <span className="font-mono text-[9px] tracking-wider block"
-                      style={{ color: 'rgba(255,255,255,0.25)' }}>DRONE BRAND</span>
+                    <span className="text-[11px] text-slate-400 block">Drone Brand</span>
                     <select
                       value={selectedDrone}
                       onChange={(e) => {
@@ -623,16 +584,14 @@ export default function Dashboard() {
                         setSelectedDrone(e.target.value)
                         if (brand !== undefined) setSourceInput(brand.url)
                       }}
-                      className="w-full font-mono text-[10px] px-2 py-1.5 rounded"
-                      style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.12)',
-                        color: 'rgba(255,255,255,0.7)', outline: 'none' }}>
+                      className="input-field text-xs py-1.5">
                       <option value="">— select brand —</option>
                       {DRONE_BRANDS.map((b) => (
                         <option key={b.name} value={b.name}>{b.name}</option>
                       ))}
                     </select>
                     {selectedDrone && (
-                      <p className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.22)' }}>
+                      <p className="text-[11px] text-slate-400">
                         {DRONE_BRANDS.find((b) => b.name === selectedDrone)?.hint}
                       </p>
                     )}
@@ -643,11 +602,7 @@ export default function Dashboard() {
                       ].map(({ label, url }) => (
                         <button key={label}
                           onClick={() => { setSourceInput(url); setSelectedDrone(''); applyDroneSource(url) }}
-                          className="font-mono text-[10px] py-1 rounded px-2 text-center transition-all"
-                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-                            color: 'rgba(255,255,255,0.35)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.8)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}>
+                          className="text-xs py-1 rounded-md px-2 text-center transition-all border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50">
                           {label}
                         </button>
                       ))}
@@ -659,27 +614,25 @@ export default function Dashboard() {
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploadStatus === 'uploading'}
-                    className="w-full font-mono text-[10px] font-bold py-3 rounded tracking-widest transition-all disabled:opacity-40"
-                    style={{ background: 'rgba(0,212,255,0.08)', border: '2px dashed rgba(0,212,255,0.3)',
-                      color: '#00d4ff' }}>
-                    {uploadStatus === 'uploading' ? 'UPLOADING…' : '↑  SELECT VIDEO FILE'}
+                    className="w-full text-xs font-medium py-3 rounded-md transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                    style={{ background: '#ecfeff', border: '2px dashed #a5f3fc', color: '#0e7490' }}>
+                    <Upload size={14} /> {uploadStatus === 'uploading' ? 'Uploading…' : 'Select Video File'}
                   </button>
                   <input ref={fileInputRef} type="file"
                     accept="video/mp4,video/quicktime,video/x-msvideo,video/webm,.mp4,.mov,.avi,.mkv,.ts,.webm,.m4v"
                     className="hidden" onChange={handleFileUpload} />
                   {uploadStatus === 'done' && (
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded"
-                      style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
-                      <span className="text-[10px]" style={{ color: '#22c55e' }}>✓</span>
-                      <span className="font-mono text-[9px] truncate" style={{ color: '#22c55e' }}>{uploadedName}</span>
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 border border-green-200">
+                      <CircleCheck size={12} className="text-green-600" />
+                      <span className="text-[11px] truncate text-green-700">{uploadedName}</span>
                     </div>
                   )}
                   {uploadStatus === 'error' && (
-                    <p className="font-mono text-[9px] text-center" style={{ color: '#ff3b3b' }}>
+                    <p className="text-[11px] text-center text-alert">
                       Upload failed — check file type
                     </p>
                   )}
-                  <p className="font-mono text-[9px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                  <p className="text-[11px] leading-relaxed text-slate-400">
                     Supported: MP4, MOV, AVI, MKV, TS, WebM · File uploads automatically, stream switches instantly
                   </p>
                 </div>
@@ -688,20 +641,19 @@ export default function Dashboard() {
           </SideSection>
 
           {/* AI engine */}
-          <SideSection title="AI ENGINE">
+          <SideSection title="AI Engine">
             <div className="space-y-0">
               {([
-                ['MODEL',    modelsStatus?.victim_model.is_custom ? 'YOLO11s' : 'YOLOv8n'],
-                ['BACKEND',  modelsStatus?.victim_model.is_custom ? 'ONNX-DirectML' : 'PyTorch'],
-                ['VERSION',  modelsStatus?.victim_model.version ?? '—'],
+                ['Model',    modelsStatus?.victim_model.is_custom ? 'YOLO11s' : 'YOLOv8n'],
+                ['Backend',  modelsStatus?.victim_model.is_custom ? 'ONNX-DirectML' : 'PyTorch'],
+                ['Version',  modelsStatus?.victim_model.version ?? '—'],
                 ['mAP@0.5',  modelsStatus?.victim_model.map50 != null ? modelsStatus.victim_model.map50.toFixed(3) : '—'],
-                ['LATENCY',  inferenceMs != null ? `${Math.round(inferenceMs)} ms` : '—'],
+                ['Latency',  inferenceMs != null ? `${Math.round(inferenceMs)} ms` : '—'],
               ] as [string, string][]).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between py-1.5"
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span className="font-mono text-[10px] tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>{k}</span>
-                  <span className="font-mono text-[10px] font-bold"
-                    style={{ color: k === 'LATENCY' ? latColor : 'rgba(255,255,255,0.75)' }}>{v}</span>
+                <div key={k} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
+                  <span className="text-xs text-slate-500">{k}</span>
+                  <span className="text-xs font-mono font-medium"
+                    style={{ color: k === 'Latency' ? latColor : '#1e293b' }}>{v}</span>
                 </div>
               ))}
             </div>
@@ -709,21 +661,19 @@ export default function Dashboard() {
         </div>
 
         {/* ── Center: live feed ───────────────────────────────────────────── */}
-        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg"
-          style={{ border: '1px solid rgba(0,212,255,0.2)', background: '#000',
-            boxShadow: canvasFlash ? '0 0 0 2px #00d4ff, 0 0 20px rgba(0,212,255,0.35)' : '0 0 8px rgba(0,212,255,0.12)',
-            transition: 'box-shadow 0.15s' }}>
+        <div className={`flex flex-col min-h-0 overflow-hidden rounded-lg bg-black shadow-card transition-shadow ${
+          canvasFlash ? 'ring-2 ring-accent border-accent' : 'border border-slate-200'
+        }`}>
 
           {/* Feed header */}
-          <div className="flex-shrink-0 flex items-center justify-between px-3 py-2"
-            style={{ background: 'rgba(0,0,0,0.6)', borderBottom: '1px solid rgba(0,212,255,0.12)' }}>
+          <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 bg-black/70 border-b border-white/10">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                FEED-3 · AERIAL
+              <span className="text-xs font-medium text-white/70">
+                Feed 3 · Aerial
               </span>
               {feedStatus === 'ACTIVE' && detecting && (
-                <span className="flex items-center gap-1 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
-                  style={{ background: 'rgba(255,59,59,0.15)', border: '1px solid rgba(255,59,59,0.4)', color: '#ff3b3b' }}>
+                <span className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+                  style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid rgba(220,38,38,0.4)', color: '#fca5a5' }}>
                   <span style={{ animation: 'pulse 1s infinite' }}>●</span> REC
                 </span>
               )}
@@ -731,20 +681,20 @@ export default function Dashboard() {
             <div className="flex items-center gap-3">
               {brightness !== null && (
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.25)' }}>LUX</span>
-                  <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.1)' }}>
+                  <span className="text-[10px] text-white/40">Lux</span>
+                  <div className="w-16 h-1 rounded-full overflow-hidden bg-white/15">
                     <div className="h-full rounded-full transition-all"
                       style={{ width: `${Math.min((brightness / 255) * 100, 100)}%`,
                         background: brightness < 60 ? '#f59e0b' : '#22c55e' }} />
                   </div>
-                  <span className="font-mono text-[9px] tabular-nums"
-                    style={{ color: brightness < 60 ? '#f59e0b' : 'rgba(255,255,255,0.3)' }}>
+                  <span className="text-[10px] tabular-nums"
+                    style={{ color: brightness < 60 ? '#fbbf24' : 'rgba(255,255,255,0.4)' }}>
                     {Math.round(brightness)}
                   </span>
                 </div>
               )}
-              <span className="font-mono text-[10px]" style={{ color: detecting ? '#22c55e' : 'rgba(255,255,255,0.2)' }}>
-                {detecting ? 'SCANNING' : 'STANDBY'}
+              <span className="text-[10px]" style={{ color: detecting ? '#4ade80' : 'rgba(255,255,255,0.3)' }}>
+                {detecting ? 'Scanning' : 'Standby'}
               </span>
             </div>
           </div>
@@ -759,13 +709,12 @@ export default function Dashboard() {
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 
             {feedStatus === 'OFFLINE' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center"
-                style={{ background: 'rgba(0,0,0,0.85)' }}>
-                <div className="font-mono text-xs font-bold tracking-widest mb-1" style={{ color: '#ff3b3b' }}>
-                  FEED SIGNAL LOST
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/85">
+                <div className="text-xs font-semibold mb-1 text-red-400">
+                  Feed Signal Lost
                 </div>
-                <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  ATTEMPTING RECONNECT...
+                <div className="text-[10px] text-white/40">
+                  Attempting reconnect...
                 </div>
               </div>
             )}
@@ -773,12 +722,12 @@ export default function Dashboard() {
             {/* Night mode banner */}
             {detecting && detectMode === 'thermal' && (
               <div className="absolute top-2 right-2 flex items-center gap-1.5 px-2.5 py-1 rounded pointer-events-none"
-                style={{ zIndex: 20, background: 'rgba(245,158,11,0.15)',
-                  border: '1px solid rgba(245,158,11,0.45)', backdropFilter: 'blur(4px)' }}>
+                style={{ zIndex: 20, background: 'rgba(217,119,6,0.2)',
+                  border: '1px solid rgba(217,119,6,0.5)', backdropFilter: 'blur(4px)' }}>
                 <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                   style={{ background: '#f59e0b', animation: 'pulse 1.5s infinite' }} />
-                <span className="font-mono text-[9px] font-bold tracking-widest" style={{ color: '#f59e0b' }}>
-                  NIGHT MODE · THERMAL
+                <span className="text-[10px] font-medium text-amber-300">
+                  Night Mode · Thermal
                 </span>
               </div>
             )}
@@ -788,68 +737,44 @@ export default function Dashboard() {
               <div className="absolute bottom-3 left-3 flex flex-col gap-1 px-3 py-2 rounded-lg"
                 style={{
                   zIndex: 15,
-                  background: 'rgba(7,11,20,0.92)',
-                  border: `1px solid ${DAMAGE_COLOR[damageLabel.label] ?? '#ffffff44'}55`,
+                  background: 'rgba(15,23,42,0.88)',
+                  border: `1px solid ${DAMAGE_COLOR[damageLabel.label] ?? '#ffffff44'}66`,
                   backdropFilter: 'blur(6px)',
                   maxWidth: '240px',
                 }}>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0"
                     style={{ background: DAMAGE_COLOR[damageLabel.label] ?? '#fff' }} />
-                  <span className="font-mono text-[10px] font-bold tracking-wider"
+                  <span className="text-[11px] font-medium"
                     style={{ color: DAMAGE_COLOR[damageLabel.label] ?? '#fff' }}>
-                    {DAMAGE_DISPLAY[damageLabel.label] ?? damageLabel.label.toUpperCase()}
+                    {DAMAGE_DISPLAY[damageLabel.label] ?? damageLabel.label}
                   </span>
                   {damageLabel.severity && damageLabel.severity !== 'CLEAR' && (
-                    <span className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded flex-shrink-0"
                       style={{
-                        background: `${SEVERITY_COLOR[damageLabel.severity] ?? '#fff'}18`,
+                        background: `${SEVERITY_COLOR[damageLabel.severity] ?? '#fff'}22`,
                         color: SEVERITY_COLOR[damageLabel.severity] ?? '#fff',
-                        border: `1px solid ${SEVERITY_COLOR[damageLabel.severity] ?? '#fff'}33`,
+                        border: `1px solid ${SEVERITY_COLOR[damageLabel.severity] ?? '#fff'}44`,
                       }}>
                       {damageLabel.severity}
                     </span>
                   )}
-                  <span className="font-mono text-[9px] ml-auto" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  <span className="text-[10px] ml-auto text-white/50">
                     {Math.round(damageLabel.confidence * 100)}%
                   </span>
                 </div>
                 {damageLabel.suggested_action && (
-                  <p className="font-mono text-[9px] leading-relaxed pl-4" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                  <p className="text-[10px] leading-relaxed pl-4 text-white/50">
                     {damageLabel.suggested_action}
                   </p>
                 )}
               </div>
             )}
-
-            {/* Corner grid overlay (decorative) */}
-            <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
-              {/* Top-left corner marks */}
-              <div className="absolute top-3 left-3 flex flex-col" style={{ gap: '2px' }}>
-                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
-                <div className="w-px h-5" style={{ background: 'rgba(0,212,255,0.4)' }} />
-              </div>
-              {/* Top-right corner marks */}
-              <div className="absolute top-3 right-3 flex flex-col items-end" style={{ gap: '2px' }}>
-                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
-                <div className="w-px h-5 self-end" style={{ background: 'rgba(0,212,255,0.4)' }} />
-              </div>
-              {/* Bottom-left */}
-              <div className="absolute bottom-3 left-3 flex flex-col-reverse" style={{ gap: '2px' }}>
-                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
-                <div className="w-px h-5" style={{ background: 'rgba(0,212,255,0.4)' }} />
-              </div>
-              {/* Bottom-right */}
-              <div className="absolute bottom-3 right-3 flex flex-col-reverse items-end" style={{ gap: '2px' }}>
-                <div className="w-5 h-px" style={{ background: 'rgba(0,212,255,0.4)' }} />
-                <div className="w-px h-5 self-end" style={{ background: 'rgba(0,212,255,0.4)' }} />
-              </div>
-            </div>
           </div>
         </div>
 
         {/* ── Right: detection log + incidents ────────────────────────────── */}
-        <div className="flex flex-col gap-2 min-h-0 overflow-hidden">
+        <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
             <DetectionLog detections={detections} latestFrame={latestFrame}
               onClear={() => { setDetections([]); setTotalFrames(0); setLatestFrame(null) }} />
@@ -869,22 +794,17 @@ export default function Dashboard() {
 
 function Metric({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
-    <div className="flex flex-col items-center" style={{ minWidth: '52px' }}>
-      <span className="font-mono text-[8px] tracking-widest" style={{ color: 'rgba(255,255,255,0.25)' }}>{label}</span>
-      <span className="font-mono text-xs font-bold tabular-nums" style={{ color: valueColor ?? 'rgba(255,255,255,0.7)' }}>{value}</span>
+    <div className="flex flex-col items-center" style={{ minWidth: '56px' }}>
+      <span className="text-[10px] text-slate-400">{label}</span>
+      <span className="text-xs font-mono font-semibold tabular-nums" style={{ color: valueColor ?? '#334155' }}>{value}</span>
     </div>
   )
 }
 
 function SideSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg overflow-hidden flex-shrink-0"
-      style={{ background: '#0d1220', border: '1px solid rgba(255,255,255,0.07)' }}>
-      <div className="px-3 py-2 font-mono text-[9px] font-bold tracking-widest"
-        style={{ color: 'rgba(255,255,255,0.3)', background: 'rgba(0,0,0,0.2)',
-          borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        {title}
-      </div>
+    <div className="panel flex-shrink-0">
+      <div className="panel-header">{title}</div>
       <div className="p-3">{children}</div>
     </div>
   )
@@ -894,12 +814,7 @@ function GhostBtn({ children, onClick, disabled }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean
 }) {
   return (
-    <button onClick={onClick} disabled={disabled}
-      className="font-mono text-[10px] font-bold tracking-widest py-1.5 rounded transition-all disabled:opacity-25"
-      style={{ border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.45)',
-        background: 'rgba(255,255,255,0.03)' }}
-      onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.8)' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.45)' }}>
+    <button onClick={onClick} disabled={disabled} className="btn-ghost text-xs py-1.5 disabled:opacity-30">
       {children}
     </button>
   )
@@ -908,15 +823,14 @@ function GhostBtn({ children, onClick, disabled }: {
 function ModelChip({ label, info, metric }: { label: string; info: ModelInfo; metric?: string }) {
   const ok = info.loaded && info.is_custom
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 rounded font-mono text-[9px]"
-      style={{ background: ok ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.06)',
-        border: `1px solid ${ok ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)'}` }}>
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: ok ? '#22c55e' : '#f59e0b' }} />
-      <span style={{ color: 'rgba(255,255,255,0.5)' }}>{label}</span>
-      <span style={{ color: ok ? '#22c55e' : '#f59e0b' }} className="font-bold">
-        {info.is_custom ? 'CUSTOM' : 'PRETRAINED'}
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px]"
+      style={{ background: ok ? '#f0fdf4' : '#fffbeb', border: `1px solid ${ok ? '#bbf7d0' : '#fde68a'}` }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: ok ? '#16a34a' : '#d97706' }} />
+      <span className="text-slate-500">{label}</span>
+      <span style={{ color: ok ? '#16a34a' : '#d97706' }} className="font-semibold">
+        {info.is_custom ? 'Custom' : 'Pretrained'}
       </span>
-      {metric && <span style={{ color: 'rgba(255,255,255,0.3)' }}>· {metric}</span>}
+      {metric && <span className="text-slate-400">· {metric}</span>}
     </div>
   )
 }
@@ -924,11 +838,11 @@ function ModelChip({ label, info, metric }: { label: string; info: ModelInfo; me
 /* ── Incident panel ─────────────────────────────────────────────────────────── */
 
 const INCIDENT_ACCENT: Record<string, string> = {
-  VICTIM_DETECTED: '#ff3b3b',
-  FIRE:            '#ff7700',
-  FLOOD:           '#00d4ff',
-  STRUCTURAL:      '#f59e0b',
-  UNKNOWN:         '#ffffff44',
+  VICTIM_DETECTED: '#dc2626',
+  FIRE:            '#ea580c',
+  FLOOD:           '#0e7490',
+  STRUCTURAL:      '#d97706',
+  UNKNOWN:         '#94a3b8',
 }
 
 function IncidentPanel() {
@@ -944,44 +858,38 @@ function IncidentPanel() {
   }, [])
 
   return (
-    <div className="rounded-lg overflow-hidden flex flex-col" style={{
-      maxHeight: '200px', background: '#0d1220', border: '1px solid rgba(255,255,255,0.07)',
-    }}>
-      <div className="flex items-center justify-between px-3 py-2 flex-shrink-0"
-        style={{ background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <span className="font-mono text-[9px] font-bold tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
-          INCIDENT LOG
-        </span>
-        <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+    <div className="panel flex flex-col" style={{ maxHeight: '200px' }}>
+      <div className="panel-header flex items-center justify-between">
+        <span>Incident Log</span>
+        <span className="badge"
           style={incidents.length > 0
-            ? { background: 'rgba(255,59,59,0.15)', color: '#ff3b3b', border: '1px solid rgba(255,59,59,0.3)' }
-            : { color: 'rgba(255,255,255,0.2)' }}>
-          {incidents.length} ACTIVE
+            ? { background: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }
+            : { color: '#94a3b8', borderColor: 'transparent' }}>
+          {incidents.length} Active
         </span>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {incidents.length === 0
-          ? <p className="font-mono text-[10px] text-center py-4" style={{ color: 'rgba(255,255,255,0.2)' }}>
-              NO ACTIVE INCIDENTS
+          ? <p className="text-xs text-center py-4 text-slate-400">
+              No active incidents
             </p>
           : [...incidents].reverse().map((inc) => {
-              const accent = INCIDENT_ACCENT[inc.type] ?? '#ffffff44'
+              const accent = INCIDENT_ACCENT[inc.type] ?? '#94a3b8'
               return (
-                <div key={inc.id} className="rounded p-2 flex flex-col gap-0.5"
-                  style={{ background: 'rgba(0,0,0,0.25)', borderLeft: `2px solid ${accent}`,
-                    border: `1px solid rgba(255,255,255,0.05)`, borderLeftColor: accent }}>
+                <div key={inc.id} className="rounded-md p-2 flex flex-col gap-0.5 bg-slate-50 border border-slate-200"
+                  style={{ borderLeft: `3px solid ${accent}` }}>
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-[10px] font-bold tracking-wider" style={{ color: accent }}>
+                    <span className="text-xs font-medium" style={{ color: accent }}>
                       {inc.type.replace('_', ' ')}
                     </span>
-                    <span className="font-mono text-[9px] px-1 py-0.5 rounded font-bold"
+                    <span className="text-[10px] px-1 py-0.5 rounded font-medium"
                       style={inc.severity === 'HIGH' || inc.severity === 'CRITICAL'
-                        ? { background: 'rgba(255,59,59,0.15)', color: '#ff3b3b' }
-                        : { background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>
+                        ? { background: '#fef2f2', color: '#dc2626' }
+                        : { background: '#fffbeb', color: '#d97706' }}>
                       {inc.severity}
                     </span>
                   </div>
-                  <p className="font-mono text-[9px] truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  <p className="text-[11px] truncate text-slate-500">
                     {inc.description}
                   </p>
                 </div>

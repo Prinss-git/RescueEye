@@ -2,23 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { API_BASE, STREAM_URL } from '../config'
+import { colors, font, radius, severityColors, spacing } from '../theme'
 
 const CLASSIFY_INTERVAL_MS = 3000
 
-const SEVERITY_COLOR: Record<string, string> = {
-  CRITICAL: '#ff3b3b',
-  MODERATE: '#f59e0b',
-  MINOR:    '#ffdc00',
-}
+const SEVERITY_COLOR = severityColors
 const DAMAGE_LABEL: Record<string, string> = {
   flood_damage:      'FLOOD DAMAGE',
   fire_damage:       'FIRE DAMAGE',
   structural_damage: 'STRUCTURAL DMG',
 }
 const DAMAGE_COLOR: Record<string, string> = {
-  flood_damage:      '#00d4ff',
-  fire_damage:       '#ff7700',
-  structural_damage: '#f97316',
+  flood_damage:      colors.cyan,
+  fire_damage:       colors.orange,
+  structural_damage: colors.orangeAlt,
 }
 
 interface DamageResult {
@@ -107,8 +104,8 @@ export default function FeedScreen() {
     return () => clearInterval(t)
   }, [detecting])
 
-  const dmgColor = damage ? (DAMAGE_COLOR[damage.label] ?? '#fff') : '#00d4ff'
-  const sevColor = damage?.severity ? (SEVERITY_COLOR[damage.severity] ?? '#fff') : '#fff'
+  const dmgColor = damage ? (DAMAGE_COLOR[damage.label] ?? colors.cyan) : colors.cyan
+  const sevColor = damage?.severity ? (SEVERITY_COLOR[damage.severity] ?? colors.cyan) : colors.cyan
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
@@ -119,9 +116,9 @@ export default function FeedScreen() {
           <Text style={s.appTitle}>RESCUEEYE</Text>
           <Text style={s.appSub}>PORTABLE SAR · AERIAL FEED</Text>
         </View>
-        <View style={[s.pill, { borderColor: status?.active ? '#22c55e44' : '#ff3b3b44' }]}>
-          <View style={[s.dot, { backgroundColor: status?.active ? '#22c55e' : '#ff3b3b' }]} />
-          <Text style={[s.pillText, { color: status?.active ? '#22c55e' : '#ff3b3b' }]}>
+        <View style={[s.pill, { borderColor: status?.active ? colors.green + '44' : colors.alert + '44' }]}>
+          <View style={[s.dot, { backgroundColor: status?.active ? colors.green : colors.alert }]} />
+          <Text style={[s.pillText, { color: status?.active ? colors.green : colors.alert }]}>
             {status?.active ? 'ACTIVE' : 'OFFLINE'}
           </Text>
         </View>
@@ -131,7 +128,7 @@ export default function FeedScreen() {
       <View style={s.feedBox}>
         {!streamOk && (
           <View style={s.feedPlaceholder}>
-            <ActivityIndicator color="#00d4ff" />
+            <ActivityIndicator color={colors.cyan} />
             <Text style={s.feedWait}>Connecting to drone feed…</Text>
             <Text style={s.feedHint}>Make sure phone and PC are on the same WiFi</Text>
           </View>
@@ -172,10 +169,8 @@ export default function FeedScreen() {
         {/* Night mode badge */}
         {detecting && (
           <View style={s.nightBadge}>
-            <View style={[s.dot, { backgroundColor: detecting ? '#22c55e' : '#666' }]} />
-            <Text style={[s.nightText, { color: detecting ? '#22c55e' : '#666' }]}>
-              {detecting ? 'SCANNING' : 'STANDBY'}
-            </Text>
+            <View style={[s.dot, { backgroundColor: colors.green }]} />
+            <Text style={[s.nightText, { color: colors.green }]}>SCANNING</Text>
           </View>
         )}
       </View>
@@ -184,14 +179,14 @@ export default function FeedScreen() {
       <TouchableOpacity
         style={[s.scanBtn, detecting && s.scanBtnStop]}
         onPress={() => { setDetecting(d => !d); if (detecting) { setDamage(null); setCasualties(0) } }}>
-        <Text style={[s.scanBtnText, detecting && { color: '#ff3b3b' }]}>
+        <Text style={[s.scanBtnText, detecting && { color: colors.alert }]}>
           {detecting ? '■  STOP SCAN' : '▶  BEGIN SCAN'}
         </Text>
       </TouchableOpacity>
 
       {/* Stats row */}
       <View style={s.statsRow}>
-        <StatBox label="CASUALTIES" value={String(casualties)} accent={casualties > 0 ? '#ff3b3b' : undefined} />
+        <StatBox label="CASUALTIES" value={String(casualties)} accent={casualties > 0 ? colors.alert : undefined} />
         <StatBox label="FEED" value={status?.source?.toUpperCase() ?? '—'} />
         <StatBox label="DAMAGE" value={damage ? (DAMAGE_LABEL[damage.label] ?? '—') : '—'} accent={damage ? dmgColor : undefined} />
       </View>
@@ -217,47 +212,47 @@ function StatBox({ label, value, accent }: { label: string; value: string; accen
 }
 
 const s = StyleSheet.create({
-  root:            { flex: 1, backgroundColor: '#07090e' },
-  content:         { padding: 16, gap: 12 },
+  root:            { flex: 1, backgroundColor: colors.bg },
+  content:         { padding: spacing.lg, gap: spacing.md },
   header:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
-  appTitle:        { fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold', color: '#00d4ff', letterSpacing: 3 },
-  appSub:          { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, marginTop: 2 },
+  appTitle:        { fontFamily: font.mono, fontSize: 16, fontWeight: 'bold', color: colors.cyan, letterSpacing: 3 },
+  appSub:          { fontFamily: font.mono, fontSize: 9, color: colors.textMuted, letterSpacing: 1, marginTop: 2 },
   pill:            { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4,
-                     borderRadius: 20, borderWidth: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  pillText:        { fontFamily: 'monospace', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
+                     borderRadius: radius.pill, borderWidth: 1, backgroundColor: colors.panelLight },
+  pillText:        { fontFamily: font.mono, fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   dot:             { width: 6, height: 6, borderRadius: 3 },
-  feedBox:         { borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(0,212,255,0.2)',
+  feedBox:         { borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.borderCyan,
                      backgroundColor: '#000', minHeight: 240, position: 'relative' },
   feedPlaceholder: { position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center',
-                     gap: 8, padding: 24, zIndex: 1 } as any,
-  feedWait:        { fontFamily: 'monospace', fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 8 },
-  feedHint:        { fontFamily: 'monospace', fontSize: 10, color: 'rgba(255,255,255,0.2)', textAlign: 'center' },
+                     gap: spacing.sm, padding: spacing.xl, zIndex: 1 } as any,
+  feedWait:        { fontFamily: font.mono, fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 8 },
+  feedHint:        { fontFamily: font.mono, fontSize: 10, color: 'rgba(255,255,255,0.35)', textAlign: 'center' },
   webview:         { width: '100%', height: 240, backgroundColor: '#000' },
   damageBadge:     { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'flex-start',
-                     gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1,
-                     backgroundColor: 'rgba(7,9,14,0.92)' },
+                     gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md,
+                     borderWidth: 1, backgroundColor: 'rgba(7,9,14,0.92)' },
   damageDot:       { width: 8, height: 8, borderRadius: 4, marginTop: 3 },
   damageRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  damageLabel:     { fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
-  damageConf:      { fontFamily: 'monospace', fontSize: 10, color: 'rgba(255,255,255,0.4)', marginLeft: 'auto' },
-  damageAction:    { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.35)', marginTop: 3 },
+  damageLabel:     { fontFamily: font.mono, fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
+  damageConf:      { fontFamily: font.mono, fontSize: 10, color: 'rgba(255,255,255,0.5)', marginLeft: 'auto' },
+  damageAction:    { fontFamily: font.mono, fontSize: 9, color: 'rgba(255,255,255,0.4)', marginTop: 3 },
   severityBadge:   { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
-  severityText:    { fontFamily: 'monospace', fontSize: 8, fontWeight: 'bold' },
+  severityText:    { fontFamily: font.mono, fontSize: 8, fontWeight: 'bold' },
   nightBadge:      { position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 5,
-                     paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
+                     paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm,
                      backgroundColor: 'rgba(7,9,14,0.7)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)' },
-  nightText:       { fontFamily: 'monospace', fontSize: 9, fontWeight: 'bold', letterSpacing: 1 },
-  scanBtn:         { paddingVertical: 14, borderRadius: 8, alignItems: 'center',
-                     backgroundColor: 'rgba(0,212,255,0.1)', borderWidth: 1, borderColor: 'rgba(0,212,255,0.5)' },
-  scanBtnStop:     { backgroundColor: 'rgba(255,59,59,0.08)', borderColor: 'rgba(255,59,59,0.5)' },
-  scanBtnText:     { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', color: '#00d4ff', letterSpacing: 2 },
-  statsRow:        { flexDirection: 'row', gap: 8 },
-  statBox:         { flex: 1, backgroundColor: '#0d1220', borderRadius: 8, padding: 10, alignItems: 'center',
-                     borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
-  statLabel:       { fontFamily: 'monospace', fontSize: 8, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, marginBottom: 4 },
-  statValue:       { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', color: 'rgba(255,255,255,0.7)' },
-  sourceBox:       { backgroundColor: '#0d1220', borderRadius: 8, padding: 10,
-                     borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
-  sourceLabel:     { fontFamily: 'monospace', fontSize: 8, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, marginBottom: 4 },
-  sourceValue:     { fontFamily: 'monospace', fontSize: 10, color: 'rgba(0,212,255,0.7)' },
+  nightText:       { fontFamily: font.mono, fontSize: 9, fontWeight: 'bold', letterSpacing: 1 },
+  scanBtn:         { paddingVertical: 14, borderRadius: radius.md, alignItems: 'center',
+                     backgroundColor: colors.cyan, borderWidth: 1, borderColor: colors.cyan },
+  scanBtnStop:     { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
+  scanBtnText:     { fontFamily: font.mono, fontSize: 13, fontWeight: 'bold', color: '#ffffff', letterSpacing: 2 },
+  statsRow:        { flexDirection: 'row', gap: spacing.sm },
+  statBox:         { flex: 1, backgroundColor: colors.panel, borderRadius: radius.md, padding: 10, alignItems: 'center',
+                     borderWidth: 1, borderColor: colors.border },
+  statLabel:       { fontFamily: font.mono, fontSize: 8, color: colors.textMuted, letterSpacing: 1, marginBottom: 4 },
+  statValue:       { fontFamily: font.mono, fontSize: 13, fontWeight: 'bold', color: colors.textSecondary },
+  sourceBox:       { backgroundColor: colors.panel, borderRadius: radius.md, padding: 10,
+                     borderWidth: 1, borderColor: colors.border },
+  sourceLabel:     { fontFamily: font.mono, fontSize: 8, color: colors.textMuted, letterSpacing: 1, marginBottom: 4 },
+  sourceValue:     { fontFamily: font.mono, fontSize: 10, color: colors.cyan },
 })

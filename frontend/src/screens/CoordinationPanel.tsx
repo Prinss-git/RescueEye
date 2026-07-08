@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { PersonStanding, Waves, Flame, Construction, TriangleAlert } from 'lucide-react'
 import { subscribeToMessages, isConfigured as firebaseConfigured } from '../lib/firebase'
 import { useAuth } from '../context/AuthContext'
 
@@ -48,38 +49,38 @@ const INCIDENT_POLL_MS = 10_000
 const MSG_POLL_MS      = 2_000
 
 const SEVERITY_STYLE: Record<Severity, string> = {
-  CRITICAL: 'text-red-400 border-red-500/50 bg-red-500/10',
-  HIGH:     'text-orange-400 border-orange-500/50 bg-orange-500/10',
-  MEDIUM:   'text-yellow-300 border-yellow-500/50 bg-yellow-500/10',
-  LOW:      'text-white/50 border-white/20 bg-white/5',
+  CRITICAL: 'text-red-700 border-red-200 bg-red-50',
+  HIGH:     'text-orange-700 border-orange-200 bg-orange-50',
+  MEDIUM:   'text-amber-700 border-amber-200 bg-amber-50',
+  LOW:      'text-slate-500 border-slate-200 bg-slate-50',
 }
 
 const INC_STATUS_STYLE: Record<IncidentStatus, string> = {
-  OPEN:     'text-alert border-alert/40 bg-alert/10',
-  ASSIGNED: 'text-yellow-300 border-yellow-500/40 bg-yellow-500/10',
-  RESOLVED: 'text-cyan/60 border-cyan/20 bg-cyan/5',
+  OPEN:     'text-alert border-red-200 bg-red-50',
+  ASSIGNED: 'text-amber-700 border-amber-200 bg-amber-50',
+  RESOLVED: 'text-accent border-accent/20 bg-accent-tint',
 }
 
 const TEAM_STATUS_STYLE: Record<TeamStatus, string> = {
-  STANDBY:    'text-white/50 border-white/20 bg-white/5',
-  DISPATCHED: 'text-yellow-300 border-yellow-400/40 bg-yellow-500/10',
-  ON_SITE:    'text-green-300 border-green-400/40 bg-green-500/10',
-  COMPLETE:   'text-cyan/70 border-cyan/20 bg-cyan/5',
+  STANDBY:    'text-slate-500 border-slate-200 bg-slate-50',
+  DISPATCHED: 'text-amber-700 border-amber-200 bg-amber-50',
+  ON_SITE:    'text-green-700 border-green-200 bg-green-50',
+  COMPLETE:   'text-accent border-accent/20 bg-accent-tint',
 }
 
 const MSG_TYPE_COLOR: Record<MsgType, string> = {
-  ALERT:             'text-red-400',
-  RESOURCE_REQUEST:  'text-yellow-300',
-  SITUATION_REPORT:  'text-cyan',
-  UPDATE:            'text-white/60',
+  ALERT:             'text-red-600',
+  RESOURCE_REQUEST:  'text-amber-600',
+  SITUATION_REPORT:  'text-accent',
+  UPDATE:            'text-slate-500',
 }
 
-const INC_TYPE_ICON: Record<IncidentType, string> = {
-  VICTIM_DETECTED: '🧍',
-  FLOOD:           '🌊',
-  FIRE:            '🔥',
-  STRUCTURAL:      '🏗',
-  UNKNOWN:         '⚠',
+const INC_TYPE_ICON: Record<IncidentType, typeof PersonStanding> = {
+  VICTIM_DETECTED: PersonStanding,
+  FLOOD:           Waves,
+  FIRE:            Flame,
+  STRUCTURAL:      Construction,
+  UNKNOWN:         TriangleAlert,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -241,20 +242,20 @@ export default function CoordinationPanel() {
           {user?.role === 'incident_commander' && (
             <button
               onClick={toggleDrill}
-              className={`text-xs font-mono px-2 py-0.5 rounded border transition-all ${
+              className={`text-xs font-medium px-2 py-0.5 rounded-full border transition-all ${
                 drillActive
-                  ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 animate-pulse'
-                  : 'bg-white/5 text-white/40 border-white/20 hover:text-white/70'
+                  ? 'bg-orange-50 text-orange-700 border-orange-200 animate-pulse'
+                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:text-slate-700'
               }`}
             >
-              {drillActive ? '● DRILL ACTIVE' : 'START DRILL'}
+              {drillActive ? '● Drill Active' : 'Start Drill'}
             </button>
           )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {incidents.length === 0 && (
-            <p className="font-mono text-xs text-white/30 text-center mt-8">— no incidents —</p>
+            <p className="font-mono text-xs text-slate-900/30 text-center mt-8">— no incidents —</p>
           )}
           {incidents.map(inc => (
             <div
@@ -262,20 +263,21 @@ export default function CoordinationPanel() {
               onClick={() => setSelectedIncident(inc)}
               className={`p-2 rounded cursor-pointer border transition-all ${
                 selectedIncident?.id === inc.id
-                  ? 'border-cyan/50 bg-cyan/5'
-                  : 'border-white/5 bg-panel-light hover:border-white/15'
+                  ? 'border-accent/50 bg-accent/5'
+                  : 'border-slate-900/5 bg-surface-alt hover:border-slate-900/15'
               }`}
             >
               <div className="flex items-center justify-between gap-1 mb-1">
-                <span className="font-mono text-xs text-white/80 truncate">
-                  {INC_TYPE_ICON[inc.type]} {inc.type.replace('_', ' ')}
-                  {inc.isDrill && <span className="ml-1 text-orange-400/80">[SIM]</span>}
+                <span className="text-xs font-medium text-slate-700 truncate flex items-center gap-1.5">
+                  {(() => { const Icon = INC_TYPE_ICON[inc.type]; return <Icon size={13} className="flex-shrink-0" /> })()}
+                  {inc.type.replace('_', ' ')}
+                  {inc.isDrill && <span className="ml-1 text-orange-600">[SIM]</span>}
                 </span>
                 <span className={`text-xs font-mono px-1.5 py-0.5 rounded border whitespace-nowrap ${SEVERITY_STYLE[inc.severity]}`}>
                   {inc.severity}
                 </span>
               </div>
-              <p className="font-mono text-xs text-white/40 truncate">{inc.description}</p>
+              <p className="font-mono text-xs text-slate-900/40 truncate">{inc.description}</p>
               <div className="flex items-center justify-between mt-1">
                 <span className={`text-xs font-mono px-1 py-0.5 rounded border ${INC_STATUS_STYLE[inc.status]}`}>
                   {inc.status}
@@ -283,7 +285,7 @@ export default function CoordinationPanel() {
                 {inc.status !== 'RESOLVED' && (
                   <button
                     onClick={(e) => { e.stopPropagation(); resolveIncident(inc.id) }}
-                    className="text-xs font-mono text-white/30 hover:text-cyan/70 transition-colors"
+                    className="text-xs font-mono text-slate-900/30 hover:text-accent/70 transition-colors"
                   >
                     RESOLVE
                   </button>
@@ -299,26 +301,26 @@ export default function CoordinationPanel() {
         <div className="panel-header">TEAMS ({teams.length})</div>
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
           {teams.map(team => (
-            <div key={team.id} className="p-3 rounded border border-white/5 bg-panel-light space-y-2">
+            <div key={team.id} className="p-3 rounded border border-slate-900/5 bg-surface-alt space-y-2">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-mono text-xs font-bold text-white">{team.name}</p>
-                  <p className="font-mono text-xs text-white/40">{team.members.join(', ')}</p>
+                  <p className="font-mono text-xs font-bold text-slate-900">{team.name}</p>
+                  <p className="font-mono text-xs text-slate-900/40">{team.members.join(', ')}</p>
                 </div>
                 <span className={`text-xs font-mono px-1.5 py-0.5 rounded border ${TEAM_STATUS_STYLE[team.status]}`}>
                   {team.status}
                 </span>
               </div>
               {team.assignedTo && (
-                <p className="font-mono text-xs text-cyan/60">→ {team.assignedTo}</p>
+                <p className="font-mono text-xs text-accent/60">→ {team.assignedTo}</p>
               )}
               <div className="flex gap-1">
                 <button
                   onClick={() => setShowAssignModal(team)}
                   disabled={!selectedIncident}
-                  className="flex-1 px-2 py-1 rounded text-xs font-mono bg-cyan/10 text-cyan/80 border border-cyan/20 hover:bg-cyan/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="flex-1 px-2 py-1 rounded text-xs font-mono bg-accent/10 text-accent/80 border border-accent/20 hover:bg-accent/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  ASSIGN →
+                  Assign →
                 </button>
               </div>
             </div>
@@ -331,7 +333,7 @@ export default function CoordinationPanel() {
         <div className="panel-header flex items-center justify-between">
           <span>MESSAGES</span>
           {selectedIncident && (
-            <span className="font-mono text-xs text-cyan/60 normal-case font-normal">
+            <span className="font-mono text-xs text-accent/60 normal-case font-normal">
               {selectedIncident.id} · {selectedIncident.type.replace('_', ' ')}
             </span>
           )}
@@ -339,7 +341,7 @@ export default function CoordinationPanel() {
 
         {!selectedIncident && (
           <div className="flex-1 flex items-center justify-center">
-            <p className="font-mono text-xs text-white/30">← Select an incident to view messages</p>
+            <p className="font-mono text-xs text-slate-900/30">← Select an incident to view messages</p>
           </div>
         )}
 
@@ -347,22 +349,22 @@ export default function CoordinationPanel() {
           <>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.length === 0 && (
-                <p className="font-mono text-xs text-white/30 text-center mt-8">— no messages —</p>
+                <p className="font-mono text-xs text-slate-900/30 text-center mt-8">— no messages —</p>
               )}
               {messages.map(msg => {
                 const isMe = msg.senderId === user?.uid
                 return (
                   <div key={msg.id} className={`flex flex-col gap-1 max-w-lg ${isMe ? 'ml-auto items-end' : 'items-start'}`}>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-cyan">{msg.senderName}</span>
-                      {msg.senderOrg && <span className="font-mono text-xs text-white/30">[{msg.senderOrg}]</span>}
+                      <span className="font-mono text-xs font-bold text-accent">{msg.senderName}</span>
+                      {msg.senderOrg && <span className="font-mono text-xs text-slate-900/30">[{msg.senderOrg}]</span>}
                       <span className={`font-mono text-xs ${MSG_TYPE_COLOR[msg.type]}`}>{msg.type}</span>
-                      <span className="font-mono text-xs text-white/20">{fmtTime(msg.timestamp)}</span>
+                      <span className="font-mono text-xs text-slate-900/20">{fmtTime(msg.timestamp)}</span>
                     </div>
                     <div className={`px-3 py-2 rounded text-sm font-mono ${
                       isMe
-                        ? 'bg-cyan/15 border border-cyan/30 text-white'
-                        : 'bg-panel-light border border-white/10 text-white/80'
+                        ? 'bg-accent/15 border border-accent/30 text-slate-900'
+                        : 'bg-surface-alt border border-slate-900/10 text-slate-900/80'
                     }`}>
                       {msg.content}
                     </div>
@@ -372,14 +374,14 @@ export default function CoordinationPanel() {
               <div ref={msgEndRef} />
             </div>
 
-            <div className="border-t border-cyan/20 p-3 flex flex-col gap-2">
+            <div className="border-t border-accent/20 p-3 flex flex-col gap-2">
               <div className="flex gap-1">
                 {(['UPDATE', 'SITUATION_REPORT', 'RESOURCE_REQUEST', 'ALERT'] as MsgType[]).map(t => (
                   <button
                     key={t}
                     onClick={() => setMsgType(t)}
                     className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
-                      msgType === t ? 'bg-cyan/20 text-cyan border border-cyan/40' : 'text-white/30 hover:text-white/60'
+                      msgType === t ? 'bg-accent/20 text-accent border border-accent/40' : 'text-slate-900/30 hover:text-slate-900/60'
                     }`}
                   >
                     {t.replace('_', ' ')}
@@ -394,7 +396,7 @@ export default function CoordinationPanel() {
                   onChange={e => setDraft(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
                 />
-                <button onClick={sendMessage} className="btn-primary px-6">SEND</button>
+                <button onClick={sendMessage} className="btn-primary px-6">Send</button>
               </div>
             </div>
           </>
@@ -405,24 +407,24 @@ export default function CoordinationPanel() {
       {showAssignModal && selectedIncident && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="panel p-6 w-96 space-y-4">
-            <p className="font-mono text-sm font-bold text-cyan">ASSIGN TEAM</p>
-            <p className="font-mono text-xs text-white/60">
-              Assign <span className="text-white">{showAssignModal.name}</span> to incident{' '}
-              <span className="text-white">{selectedIncident.id}</span>?
+            <p className="text-sm font-semibold text-accent">Assign Team</p>
+            <p className="font-mono text-xs text-slate-900/60">
+              Assign <span className="text-slate-900">{showAssignModal.name}</span> to incident{' '}
+              <span className="text-slate-900">{selectedIncident.id}</span>?
             </p>
-            <p className="font-mono text-xs text-white/40 truncate">{selectedIncident.description}</p>
+            <p className="font-mono text-xs text-slate-900/40 truncate">{selectedIncident.description}</p>
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => assignTeam(showAssignModal.id, selectedIncident.id)}
                 className="btn-primary flex-1"
               >
-                CONFIRM
+                Confirm
               </button>
               <button
                 onClick={() => setShowAssignModal(null)}
                 className="btn-ghost flex-1"
               >
-                CANCEL
+                Cancel
               </button>
             </div>
           </div>

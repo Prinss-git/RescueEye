@@ -28,9 +28,7 @@ from services.yolo_model import (
     victim_state,
 )
 from services.detection_store import add_detections
-import warnings as _warnings
-_warnings.filterwarnings("ignore", category=FutureWarning, module="supervision")
-from supervision import ByteTrack as _SvByteTrack, Detections as SvDetections
+from services.tracker import Sort
 from routers.logs import append_log
 
 logger = logging.getLogger("rescueeye.detect")
@@ -53,13 +51,8 @@ _grid_lock = asyncio.Lock()
 _ntfy_last_sent: float = 0.0
 _ntfy_lock = asyncio.Lock()
 
-# ByteTrack — two-stage association for better occlusion handling than SORT
-_tracker = _SvByteTrack(
-    track_activation_threshold=0.25,
-    lost_track_buffer=30,
-    minimum_matching_threshold=0.8,
-    frame_rate=8,
-)
+# SORT tracker — persists across requests, maintains Kalman state per person
+_tracker = Sort(max_age=4, min_hits=1, iou_threshold=0.20)
 
 
 
@@ -253,22 +246,6 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float = 0.45) -> lis
     return keep
 
 
-def _wbf_merge(boxes: np.ndarray, scores: np.ndarray,
-               fw: int, fh: int, iou_thresh: float = 0.55) -> tuple[np.ndarray, np.ndarray]:
-    """Weighted Box Fusion — averages overlapping SAHI tile boxes weighted by confidence."""
-    if len(boxes) == 0:
-        return boxes, scores
-    from ensemble_boxes import weighted_boxes_fusion
-    norm = np.array([[fw, fh, fw, fh]], dtype=np.float32)
-    norm_boxes = (boxes / norm).clip(0.0, 1.0).tolist()
-    fused_boxes, fused_scores, _ = weighted_boxes_fusion(
-        [norm_boxes], [scores.tolist()], [[0] * len(scores)],
-        iou_thr=iou_thresh, skip_box_thr=CONFIDENCE_THRESHOLD,
-    )
-    out_boxes = np.array(fused_boxes, dtype=np.float32) * norm
-    return out_boxes, np.array(fused_scores, dtype=np.float32)
-
-
 def _run_victim_ort(frame: np.ndarray) -> tuple[list[dict], float]:
     """GPU inference via DirectML ONNX Runtime (bypasses PyTorch entirely)."""
     sess = get_victim_ort_session()
@@ -387,13 +364,11 @@ def _run_victim_ort_sahi(frame: np.ndarray) -> tuple[list[dict], float]:
 
     boxes  = np.array(all_boxes,  dtype=np.float32)
     scores = np.array(all_scores, dtype=np.float32)
-    boxes, scores = _wbf_merge(boxes, scores, fw, fh, iou_thresh=0.55)
+    keep   = _nms(boxes, scores, iou_thresh=0.30)
 
     detections: list[dict] = []
-    for i in range(len(boxes)):
+    for i in keep:
         x1, y1, x2, y2 = boxes[i]
-        if x2 <= x1 or y2 <= y1:
-            continue
         detections.append({
             "class":      "person",
             "confidence": round(float(scores[i]), 3),
@@ -401,8 +376,8 @@ def _run_victim_ort_sahi(frame: np.ndarray) -> tuple[list[dict], float]:
         })
 
     logger.info(
-        f"[ort-sahi] tiles={n}x{n} pre_wbf={len(all_boxes)} "
-        f"post_wbf={len(detections)} inference={elapsed_ms:.0f}ms"
+        f"[ort-sahi] tiles={n}x{n} pre_nms={len(all_boxes)} "
+        f"post_nms={len(detections)} inference={elapsed_ms:.0f}ms"
     )
     return detections, round(elapsed_ms, 1)
 
@@ -487,38 +462,32 @@ async def detect_objects(payload: dict = Body(...)):
         display_frame            = frame
         detections, inference_ms = _run_victim(frame)
 
-    # ── ByteTrack — two-stage association, handles occlusion better than SORT ─
-    det_class = "life_sign" if mode == "thermal" else "person"
-    fh, fw = frame.shape[:2]
+    # ── SORT tracking — assign persistent IDs via Kalman filter ─────────────
     if detections:
-        sv_dets = SvDetections(
-            xyxy=np.array([
-                [d["bbox"]["x"], d["bbox"]["y"],
-                 d["bbox"]["x"] + d["bbox"]["w"],
-                 d["bbox"]["y"] + d["bbox"]["h"]]
-                for d in detections
-            ], dtype=np.float32),
-            confidence=np.array([d["confidence"] for d in detections], dtype=np.float32),
-            class_id=np.zeros(len(detections), dtype=int),
-        )
-        tracked = _tracker.update_with_detections(sv_dets)
+        det_arr = np.array([
+            [d["bbox"]["x"], d["bbox"]["y"],
+             d["bbox"]["x"] + d["bbox"]["w"],
+             d["bbox"]["y"] + d["bbox"]["h"],
+             d["confidence"]]
+            for d in detections
+        ], dtype=np.float32)
+        tracked = _tracker.update(det_arr)  # [M, 6]: x1,y1,x2,y2,score,track_id
         detections = []
-        for i in range(len(tracked)):
-            x1, y1, x2, y2 = tracked.xyxy[i]
-            score = float(tracked.confidence[i])
-            tid   = int(tracked.tracker_id[i])
+        for row in tracked:
+            x1, y1, x2, y2, score, tid = row
+            fh, fw = frame.shape[:2]
             detections.append({
-                "class":      det_class,
-                "confidence": round(score, 3),
-                "track_id":   tid,
-                "bbox": {
+                "class":      "person",
+                "confidence": round(float(score), 3),
+                "track_id":   int(tid),
+                "bbox":       {
                     "x": max(0, int(x1)), "y": max(0, int(y1)),
                     "w": min(fw - max(0, int(x1)), int(x2 - x1)),
                     "h": min(fh - max(0, int(y1)), int(y2 - y1)),
                 },
             })
     else:
-        _tracker.update_with_detections(SvDetections.empty())
+        _tracker.update(np.empty((0, 5), dtype=np.float32))
 
     frame_id  = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()

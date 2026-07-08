@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import { API_BASE } from '../config'
+import { colors, font, radius, spacing } from '../theme'
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -22,11 +23,11 @@ interface Detection {
 }
 
 const CLASS_COLOR: Record<string, string> = {
-  person:            '#ff3b3b',
-  life_sign:         '#ffdc00',
-  fire_damage:       '#ff7700',
-  flood_damage:      '#00d4ff',
-  structural_damage: '#f97316',
+  person:            colors.alert,
+  life_sign:         colors.yellow,
+  fire_damage:       colors.orange,
+  flood_damage:      colors.cyan,
+  structural_damage: colors.orangeAlt,
 }
 const CLASS_LABEL: Record<string, string> = {
   person:            'CASUALTY',
@@ -98,8 +99,8 @@ export default function LogScreen() {
         </View>
         <View style={s.headerRight}>
           <TouchableOpacity style={s.pollBtn} onPress={() => setPolling(p => !p)}>
-            <View style={[s.dot, { backgroundColor: polling ? '#22c55e' : '#666' }]} />
-            <Text style={[s.pollText, { color: polling ? '#22c55e' : '#666' }]}>
+            <View style={[s.dot, { backgroundColor: polling ? colors.green : '#666' }]} />
+            <Text style={[s.pollText, { color: polling ? colors.green : '#666' }]}>
               {polling ? 'LIVE' : 'PAUSED'}
             </Text>
           </TouchableOpacity>
@@ -121,7 +122,7 @@ export default function LogScreen() {
           keyExtractor={d => d.id}
           contentContainerStyle={{ padding: 12, gap: 8 }}
           renderItem={({ item: d }) => {
-            const accent = CLASS_COLOR[d.class] ?? '#ffffff44'
+            const accent = CLASS_COLOR[d.class] ?? colors.textFaint
             const label  = CLASS_LABEL[d.class] ?? d.class.toUpperCase()
             const conf   = Math.round(d.confidence * 100)
             const ts     = new Date(d.timestamp).toLocaleTimeString('en-PH', { hour12: false })
@@ -151,34 +152,34 @@ export default function LogScreen() {
 }
 
 const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: '#07090e' },
+  root:        { flex: 1, backgroundColor: colors.bg },
   header:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                 paddingHorizontal: 16, paddingVertical: 12,
-                 borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)',
-                 backgroundColor: '#0d1220' },
-  title:       { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', color: 'rgba(255,255,255,0.7)', letterSpacing: 2 },
-  sub:         { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 2 },
-  headerRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+                 paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+                 borderBottomWidth: 1, borderBottomColor: colors.border,
+                 backgroundColor: colors.panel },
+  title:       { fontFamily: font.mono, fontSize: 13, fontWeight: 'bold', color: colors.textSecondary, letterSpacing: 2 },
+  sub:         { fontFamily: font.mono, fontSize: 9, color: colors.textMuted, marginTop: 2 },
+  headerRight: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   pollBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5,
-                 borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
-                 backgroundColor: 'rgba(0,0,0,0.3)' },
+                 borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+                 backgroundColor: colors.panelLight },
   dot:         { width: 6, height: 6, borderRadius: 3 },
-  pollText:    { fontFamily: 'monospace', fontSize: 9, fontWeight: 'bold' },
-  clearBtn:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
-                 borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  clearText:   { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.4)' },
-  empty:       { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  emptyIcon:   { fontSize: 32, color: 'rgba(255,255,255,0.1)' },
-  emptyText:   { fontFamily: 'monospace', fontSize: 11, color: 'rgba(255,255,255,0.2)', letterSpacing: 2 },
-  emptyHint:   { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.15)', textAlign: 'center', paddingHorizontal: 32 },
-  card:        { backgroundColor: '#0d1220', borderRadius: 8, padding: 12, gap: 8,
-                 borderLeftWidth: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
+  pollText:    { fontFamily: font.mono, fontSize: 9, fontWeight: 'bold' },
+  clearBtn:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.sm,
+                 borderWidth: 1, borderColor: colors.border },
+  clearText:   { fontFamily: font.mono, fontSize: 9, color: colors.textSecondary },
+  empty:       { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  emptyIcon:   { fontSize: 32, color: colors.textFaint },
+  emptyText:   { fontFamily: font.mono, fontSize: 11, color: colors.textFaint, letterSpacing: 2 },
+  emptyHint:   { fontFamily: font.mono, fontSize: 9, color: colors.textFaint, textAlign: 'center', paddingHorizontal: 32 },
+  card:        { backgroundColor: colors.panel, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm,
+                 borderLeftWidth: 3, borderWidth: 1, borderColor: colors.border },
   cardTop:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardLeft:    { gap: 2 },
-  cardClass:   { fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
-  cardConf:    { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.35)' },
-  cardTime:    { fontFamily: 'monospace', fontSize: 9, color: 'rgba(255,255,255,0.25)' },
-  barBg:       { height: 2, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' },
+  cardClass:   { fontFamily: font.mono, fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
+  cardConf:    { fontFamily: font.mono, fontSize: 9, color: colors.textSecondary },
+  cardTime:    { fontFamily: font.mono, fontSize: 9, color: colors.textMuted },
+  barBg:       { height: 2, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' },
   barFill:     { height: 2, borderRadius: 2 },
-  cardCoords:  { fontFamily: 'monospace', fontSize: 9, color: 'rgba(0,212,255,0.4)' },
+  cardCoords:  { fontFamily: font.mono, fontSize: 9, color: colors.cyan },
 })
