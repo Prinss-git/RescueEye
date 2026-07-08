@@ -30,6 +30,7 @@ interface Team {
   status:     TeamStatus
   members:    string[]
   assignedTo: string | null
+  agencyId:   string | null
 }
 
 interface Message {
@@ -209,7 +210,7 @@ export default function CoordinationPanel() {
       await fetch(`/server/teams/${teamId}/assign`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ incidentId }),
+        body: JSON.stringify({ incidentId, assignedBy: user?.uid }),
       })
       setShowAssignModal(null)
       fetchTeams()
@@ -230,6 +231,10 @@ export default function CoordinationPanel() {
       fetchIncidents()
     } catch {}
   }
+
+  // Command Staff only dispatch their own agency's teams, plus the legacy
+  // unscoped (agencyId: null) demo teams.
+  const visibleTeams = teams.filter(t => !t.agencyId || t.agencyId === user?.agencyId)
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -298,9 +303,9 @@ export default function CoordinationPanel() {
 
       {/* ── CENTER: Teams ───────────────────────────────────────────────────── */}
       <div className="w-72 flex flex-col panel overflow-hidden">
-        <div className="panel-header">TEAMS ({teams.length})</div>
+        <div className="panel-header">TEAMS ({visibleTeams.length})</div>
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {teams.map(team => (
+          {visibleTeams.map(team => (
             <div key={team.id} className="p-3 rounded border border-slate-900/5 bg-surface-alt space-y-2">
               <div className="flex items-start justify-between">
                 <div>

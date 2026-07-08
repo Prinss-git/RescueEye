@@ -31,9 +31,9 @@ router.patch('/:id/status', (req, res) => {
 
 // PATCH /teams/:teamId/assign
 router.patch('/:teamId/assign', (req, res) => {
-  const { incidentId } = req.body;
+  const { incidentId, assignedBy } = req.body;
   if (!incidentId) return res.status(400).json({ error: 'incidentId is required' });
-  const result = store.assignTeam(req.params.teamId, incidentId);
+  const result = store.assignTeam(req.params.teamId, incidentId, assignedBy);
   if (!result) return res.status(404).json({ error: 'Team not found' });
   store.incrementDrillCounter('teamActions');
   res.json(result);

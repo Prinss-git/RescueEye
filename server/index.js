@@ -12,6 +12,7 @@ const drillRoutes   = require('./routes/drill');
 const evalRoutes    = require('./routes/evaluation');
 const adminRoutes   = require('./routes/admin');
 const agencyRoutes  = require('./routes/agency');
+const missionsRoutes = require('./routes/missions');
 
 // ── Firebase Admin SDK ────────────────────────────────────────────────────────
 let firebaseAdmin = null;
@@ -62,10 +63,32 @@ app.use('/drill',      drillRoutes);
 app.use('/evaluation', evalRoutes);
 app.use('/admin',      adminRoutes);
 app.use('/agency',     agencyRoutes);
+app.use('/missions',   missionsRoutes);
 
-// Seed the first System Admin account — otherwise nobody could ever create
-// one through the app (System Admins are the ones who create Agency Admins).
-(async () => {
+// Global error handler
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// ── Startup sequence ──────────────────────────────────────────────────────────
+// Hydration must complete (or gracefully fail) before the bootstrap System
+// Admin check and before the server accepts traffic — otherwise a restart
+// would recreate a brand-new System Admin every time, orphaning any agencies
+// whose createdBy pointed at the previous one.
+async function start() {
+  const result = await store.hydrate();
+  if (result.skipped) {
+    console.log('[store] Hydration skipped — running in-memory only');
+  } else {
+    console.log(
+      `[store] Hydrated from Firestore — teams:${result.teams} incidents:${result.incidents} ` +
+      `messages:${result.messages} agencies:${result.agencies} users:${result.users}`
+    );
+  }
+
+  // Seed the first System Admin account — otherwise nobody could ever create
+  // one through the app (System Admins are the ones who create Agency Admins).
   const email = 'sysadmin@rescueeye.ph';
   if (!store.getUserByEmail(email)) {
     const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin12345';
@@ -77,16 +100,14 @@ app.use('/agency',     agencyRoutes);
       agencyId:     null,
       passwordHash: await hashPassword(password),
     });
-    console.log(`[bootstrap] System Admin ready — ${email} / (see BOOTSTRAP_ADMIN_PASSWORD)`);
+    console.log(`[bootstrap] System Admin created — ${email} / (see BOOTSTRAP_ADMIN_PASSWORD)`);
+  } else {
+    console.log(`[bootstrap] System Admin already present — ${email}`);
   }
-})();
 
-// Global error handler
-app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+  app.listen(PORT, () => {
+    console.log(`[server] RescueEye server v0.4.0 running on http://localhost:${PORT}`);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`[server] RescueEye server v0.4.0 running on http://localhost:${PORT}`);
-});
+start();

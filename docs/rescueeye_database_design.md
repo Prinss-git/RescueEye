@@ -102,11 +102,14 @@ Relational schema for the RescueEye capstone manuscript. Table names are full de
 |---|---|---|---|
 | `TEAM_ID` | VARCHAR(20) | PK | Unique team identifier (e.g. `T001`) |
 | `TEAM_Name` | VARCHAR(50) | NOT NULL | Team display name |
+| `TEAM_AgencyID` | VARCHAR(20) | FK → `Agency.AGCY_ID`, NULL | Owning agency (NULL for the legacy demo teams, visible to all agencies) |
 | `TEAM_Type` | VARCHAR(10) | NOT NULL | `SAR` or `EMS` |
 | `TEAM_Status` | VARCHAR(20) | NOT NULL, DEFAULT `STANDBY` | `STANDBY`, `DISPATCHED`, `ON_SITE`, `COMPLETE` |
 | `TEAM_UpdatedAt` | DATETIME | NOT NULL | Last status change |
 
 ## TeamMember (junction)
+
+Implemented in the running system as `Team.memberUserIds` (an array of `User.USER_ID` values directly on the team document) rather than a separate join table — functionally equivalent to the relational junction below, just denormalized to fit the Firestore document model.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
@@ -197,4 +200,5 @@ One row per team dispatched to an incident. An incident can have **two concurren
 
 - `User`, `Team`, `Incident`, `Message`, `DrillSession` map directly to the existing `/users`, `/teams`, `/incidents`, `/messages`, `/drill_sessions` Firestore collections (`server/firebase-schema.md`), with camelCase fields renamed to the `XXXX_FieldName` convention.
 - `Detection` formalizes the transient, in-memory `StoredDetection` object currently in `api/services/detection_store.py` (ring buffer, not persisted) into a durable table with a review workflow.
-- `Drone`, `TeamMember`, `Mission`, and `Alert` are new tables — they don't exist in the current implementation but are required to represent the full activity-diagram workflow (drone tracking, team membership, dispatch lifecycle, and notification delivery) in a normalized relational model.
+- `Mission` and `TeamMember` are now implemented in the live Firestore-backed system (`server/lib/store.js` — `missions` collection, `Team.memberUserIds`), covering the dispatch lifecycle from `ASSIGNED` through `COMPLETED`/`DECLINED`, including the EMS-only `TREATING` branch.
+- `Drone` and `Alert` remain planned, not yet implemented — real drone telemetry and a push/SMS notification channel are still simulated (local device notifications only), tracked as a separate gap.

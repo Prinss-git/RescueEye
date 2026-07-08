@@ -13,6 +13,8 @@ const CREATABLE_ROLES = [
   'ems_responder',
 ];
 
+const TEAM_MEMBER_ROLES = ['sar_responder', 'ems_responder'];
+
 router.use(requireAuth, requireRole('agency_admin'));
 
 function toSafeUser(user) {
@@ -69,6 +71,53 @@ router.patch('/users/:id/active', (req, res) => {
 
   const updated = store.setUserActive(req.params.id, active);
   res.json(toSafeUser(updated));
+});
+
+// GET /agency/teams — list the caller's agency's teams
+router.get('/teams', (req, res) => {
+  res.json(store.getTeams({ agencyId: req.user.agencyId }));
+});
+
+// POST /agency/teams — create a team scoped to the caller's agency
+router.post('/teams', (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+
+  const team = store.createTeam({ name, agencyId: req.user.agencyId });
+  res.status(201).json(team);
+});
+
+// POST /agency/teams/:teamId/members — add a Field Responder to a team roster
+router.post('/teams/:teamId/members', (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+  const team = store.getTeamById(req.params.teamId);
+  if (!team || team.agencyId !== req.user.agencyId) {
+    return res.status(404).json({ error: 'Team not found in your agency' });
+  }
+
+  const member = store.getUserById(userId);
+  if (!member || member.agencyId !== req.user.agencyId) {
+    return res.status(404).json({ error: 'User not found in your agency' });
+  }
+  if (!TEAM_MEMBER_ROLES.includes(member.role)) {
+    return res.status(400).json({ error: `Only these roles can join a team: ${TEAM_MEMBER_ROLES.join(', ')}` });
+  }
+
+  const updated = store.addTeamMember(req.params.teamId, userId);
+  res.json(updated);
+});
+
+// DELETE /agency/teams/:teamId/members/:userId — remove a responder from a team roster
+router.delete('/teams/:teamId/members/:userId', (req, res) => {
+  const team = store.getTeamById(req.params.teamId);
+  if (!team || team.agencyId !== req.user.agencyId) {
+    return res.status(404).json({ error: 'Team not found in your agency' });
+  }
+
+  const updated = store.removeTeamMember(req.params.teamId, req.params.userId);
+  res.json(updated);
 });
 
 module.exports = router;

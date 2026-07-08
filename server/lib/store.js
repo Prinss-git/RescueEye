@@ -18,11 +18,11 @@ function getDb() {
 // ── In-memory collections ─────────────────────────────────────────────────────
 
 const teams = [
-  { id: 'T001', name: 'Alpha Team',   status: 'STANDBY',    members: ['Reyes', 'Santos'],       assignedTo: null },
-  { id: 'T002', name: 'Bravo Team',   status: 'STANDBY',    members: ['Cruz', 'Dela Rosa'],     assignedTo: null },
-  { id: 'T003', name: 'Charlie Team', status: 'DISPATCHED', members: ['Lim', 'Garcia', 'Tan'],  assignedTo: null },
-  { id: 'T004', name: 'Delta Team',   status: 'ON_SITE',    members: ['Ramos', 'Torres'],       assignedTo: null },
-  { id: 'T005', name: 'Echo Team',    status: 'STANDBY',    members: ['Bautista', 'Flores'],    assignedTo: null },
+  { id: 'T001', name: 'Alpha Team',   status: 'STANDBY',    members: ['Reyes', 'Santos'],       assignedTo: null, agencyId: null, memberUserIds: [] },
+  { id: 'T002', name: 'Bravo Team',   status: 'STANDBY',    members: ['Cruz', 'Dela Rosa'],     assignedTo: null, agencyId: null, memberUserIds: [] },
+  { id: 'T003', name: 'Charlie Team', status: 'DISPATCHED', members: ['Lim', 'Garcia', 'Tan'],  assignedTo: null, agencyId: null, memberUserIds: [] },
+  { id: 'T004', name: 'Delta Team',   status: 'ON_SITE',    members: ['Ramos', 'Torres'],       assignedTo: null, agencyId: null, memberUserIds: [] },
+  { id: 'T005', name: 'Echo Team',    status: 'STANDBY',    members: ['Bautista', 'Flores'],    assignedTo: null, agencyId: null, memberUserIds: [] },
 ];
 
 const incidents = [];
@@ -33,18 +33,71 @@ const agencies = [];
 
 const users = [];
 
+const missions = [];
+
 // Active drill session (null if no drill running)
 let activeDrill = null;
 let drillInterval = null;
 
 // ── Teams ─────────────────────────────────────────────────────────────────────
 
-function getTeams() {
-  return teams;
+// Computes a display-friendly `members` array (names) from memberUserIds,
+// falling back to the legacy hardcoded `members` strings for the 5 seed
+// teams that predate real account linkage.
+function _withDisplayMembers(team) {
+  if (team.memberUserIds && team.memberUserIds.length > 0) {
+    const names = team.memberUserIds
+      .map((uid) => users.find((u) => u.uid === uid)?.displayName)
+      .filter(Boolean);
+    return { ...team, members: names };
+  }
+  return team;
+}
+
+function getTeams(filter = {}) {
+  let list = [...teams];
+  if (filter.agencyId) list = list.filter(t => t.agencyId === filter.agencyId);
+  return list.map(_withDisplayMembers);
 }
 
 function getTeamById(id) {
-  return teams.find(t => t.id === id) || null;
+  const team = teams.find(t => t.id === id);
+  return team ? _withDisplayMembers(team) : null;
+}
+
+function createTeam(data) {
+  const team = {
+    id:            `T-${Date.now()}`,
+    name:          data.name,
+    status:        'STANDBY',
+    members:       [],
+    memberUserIds: [],
+    assignedTo:    null,
+    agencyId:      data.agencyId || null,
+    createdAt:     new Date().toISOString(),
+  };
+  teams.push(team);
+  _syncTeam(team);
+  return team;
+}
+
+function addTeamMember(teamId, userId) {
+  const team = teams.find(t => t.id === teamId);
+  if (!team) return null;
+  if (!team.memberUserIds) team.memberUserIds = [];
+  if (!team.memberUserIds.includes(userId)) team.memberUserIds.push(userId);
+  team.updatedAt = new Date().toISOString();
+  _syncTeam(team);
+  return _withDisplayMembers(team);
+}
+
+function removeTeamMember(teamId, userId) {
+  const team = teams.find(t => t.id === teamId);
+  if (!team) return null;
+  team.memberUserIds = (team.memberUserIds || []).filter(id => id !== userId);
+  team.updatedAt = new Date().toISOString();
+  _syncTeam(team);
+  return _withDisplayMembers(team);
 }
 
 function updateTeamStatus(teamId, status) {
@@ -56,7 +109,7 @@ function updateTeamStatus(teamId, status) {
   return team;
 }
 
-function assignTeam(teamId, incidentId) {
+function assignTeam(teamId, incidentId, assignedBy) {
   const team = teams.find(t => t.id === teamId);
   if (!team) return null;
   // Un-assign previous incident
@@ -76,7 +129,22 @@ function assignTeam(teamId, incidentId) {
     _syncIncident(incident);
   }
   _syncTeam(team);
-  return { team, incident };
+
+  let mission = null;
+  if (incidentId) {
+    const existing = missions.find(m =>
+      m.teamId === teamId && m.incidentId === incidentId &&
+      !['COMPLETED', 'DECLINED'].includes(m.status)
+    );
+    mission = existing || createMission({
+      incidentId,
+      teamId,
+      assignedBy: assignedBy || null,
+      responderUserIds: team.memberUserIds || [],
+    });
+  }
+
+  return { team: _withDisplayMembers(team), incident, mission };
 }
 
 // ── Incidents ─────────────────────────────────────────────────────────────────
@@ -241,6 +309,54 @@ function setUserActive(uid, active) {
   return user;
 }
 
+// ── Missions ──────────────────────────────────────────────────────────────────
+
+const MISSION_TERMINAL_STATUSES = ['COMPLETED', 'DECLINED'];
+
+function getMissions(filter = {}) {
+  let list = [...missions];
+  if (filter.userId)     list = list.filter(m => (m.responderUserIds || []).includes(filter.userId));
+  if (filter.incidentId) list = list.filter(m => m.incidentId === filter.incidentId);
+  if (filter.teamId)     list = list.filter(m => m.teamId === filter.teamId);
+  return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function getMissionById(id) {
+  return missions.find(m => m.id === id) || null;
+}
+
+function createMission(data) {
+  const mission = {
+    id:               `MISS-${Date.now()}`,
+    incidentId:       data.incidentId,
+    teamId:           data.teamId,
+    assignedBy:       data.assignedBy || null,
+    responderUserIds: data.responderUserIds || [],
+    status:           'ASSIGNED',
+    medicalRequired:  null,
+    notes:            '',
+    createdAt:        new Date().toISOString(),
+    acceptedAt:       null,
+    completedAt:      null,
+  };
+  missions.push(mission);
+  _syncMission(mission);
+  return mission;
+}
+
+function updateMissionStatus(id, updates) {
+  const mission = missions.find(m => m.id === id);
+  if (!mission) return null;
+  if (updates.status !== undefined)          mission.status = updates.status;
+  if (updates.notes !== undefined)           mission.notes = updates.notes;
+  if (updates.medicalRequired !== undefined) mission.medicalRequired = updates.medicalRequired;
+  if (updates.status === 'ACCEPTED') mission.acceptedAt = new Date().toISOString();
+  if (updates.status === 'COMPLETED') mission.completedAt = new Date().toISOString();
+  mission.updatedAt = new Date().toISOString();
+  _syncMission(mission);
+  return mission;
+}
+
 // ── Drill ─────────────────────────────────────────────────────────────────────
 
 const DRILL_INCIDENT_TYPES = ['VICTIM_DETECTED', 'FLOOD', 'FIRE', 'STRUCTURAL'];
@@ -375,11 +491,81 @@ async function _syncUser(user) {
   }
 }
 
+async function _syncMission(mission) {
+  if (!_db) return;
+  try {
+    await _db.collection('missions').doc(mission.id).set(mission, { merge: true });
+  } catch (e) {
+    console.warn('[store] Firestore mission sync failed:', e.message);
+  }
+}
+
+// ── Hydration ─────────────────────────────────────────────────────────────────
+// Reads existing Firestore data into the in-memory arrays at startup, so the
+// in-memory store becomes a warm cache of Firestore rather than the source of
+// truth. Must run (and be awaited) before the server starts accepting requests.
+
+async function hydrate() {
+  if (!_db) return { skipped: true };
+
+  try {
+    const [teamsSnap, incidentsSnap, messagesSnap, agenciesSnap, usersSnap, missionsSnap] = await Promise.all([
+      _db.collection('teams').get(),
+      _db.collection('incidents').get(),
+      _db.collection('messages').get(),
+      _db.collection('agencies').get(),
+      _db.collection('users').get(),
+      _db.collection('missions').get(),
+    ]);
+
+    if (!teamsSnap.empty) {
+      teams.length = 0;
+      teamsSnap.forEach((doc) => teams.push(doc.data()));
+    } else {
+      // Fresh Firestore project — keep the hardcoded seed teams and write
+      // them through so future restarts read them back from here on.
+      await Promise.all(teams.map((t) => _syncTeam(t)));
+    }
+
+    incidents.length = 0;
+    incidentsSnap.forEach((doc) => incidents.push(doc.data()));
+
+    messages.length = 0;
+    messagesSnap.forEach((doc) => messages.push(doc.data()));
+
+    agencies.length = 0;
+    agenciesSnap.forEach((doc) => agencies.push(doc.data()));
+
+    users.length = 0;
+    usersSnap.forEach((doc) => users.push(doc.data()));
+
+    missions.length = 0;
+    missionsSnap.forEach((doc) => missions.push(doc.data()));
+
+    return {
+      skipped: false,
+      teams: teams.length,
+      incidents: incidents.length,
+      messages: messages.length,
+      agencies: agencies.length,
+      users: users.length,
+      missions: missions.length,
+    };
+  } catch (e) {
+    console.warn('[store] Firestore hydration failed, falling back to in-memory defaults:', e.message);
+    return { skipped: true, error: e.message };
+  }
+}
+
 module.exports = {
+  hydrate,
   setDb,
   getDb,
   getTeams,
   getTeamById,
+  createTeam,
+  addTeamMember,
+  removeTeamMember,
   updateTeamStatus,
   assignTeam,
   getIncidents,
@@ -398,6 +584,10 @@ module.exports = {
   createUser,
   touchUserLogin,
   setUserActive,
+  getMissions,
+  getMissionById,
+  createMission,
+  updateMissionStatus,
   startDrill,
   stopDrill,
   getDrillStatus,

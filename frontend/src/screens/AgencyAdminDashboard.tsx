@@ -11,6 +11,15 @@ interface AgencyUser {
   lastLogin: string | null
 }
 
+interface Team {
+  id: string
+  name: string
+  status: string
+  members: string[]
+  memberUserIds: string[]
+  assignedTo: string | null
+}
+
 const ROLE_LABELS: Record<string, string> = {
   incident_commander: 'Incident Commander',
   drone_operator:      'Drone Operator',
@@ -60,9 +69,115 @@ function RoleGroup({ title, roles, users, onToggleActive }: {
   )
 }
 
+function TeamsPanel({ teams, users, onCreateTeam, onAddMember, onRemoveMember }: {
+  teams: Team[]
+  users: AgencyUser[]
+  onCreateTeam: (name: string) => Promise<void>
+  onAddMember: (teamId: string, userId: string) => void
+  onRemoveMember: (teamId: string, userId: string) => void
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const [name, setName]         = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [pendingUser, setPendingUser] = useState<Record<string, string>>({})
+
+  const responders = users.filter((u) => FIELD_RESPONDER_ROLES.includes(u.role) && u.active)
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) return
+    setSubmitting(true)
+    try {
+      await onCreateTeam(name.trim())
+      setName('')
+      setShowForm(false)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="panel overflow-hidden">
+      <div className="panel-header flex items-center justify-between">
+        <span>Teams ({teams.length})</span>
+        <button onClick={() => setShowForm((s) => !s)} className="text-accent text-xs font-medium normal-case">
+          {showForm ? 'Cancel' : '+ Add Team'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleCreate} className="p-3 border-b border-slate-200 flex gap-2">
+          <input className="input-field text-sm" placeholder="Team name (e.g. Foxtrot Team)"
+            value={name} onChange={(e) => setName(e.target.value)} disabled={submitting} />
+          <button type="submit" className="btn-primary text-xs flex-shrink-0" disabled={submitting}>
+            {submitting ? 'Creating…' : 'Create'}
+          </button>
+        </form>
+      )}
+
+      <div className="p-3 space-y-3">
+        {teams.length === 0 && (
+          <p className="text-sm text-slate-400 text-center py-4">— no teams yet —</p>
+        )}
+        {teams.map((team) => {
+          const memberUsers = team.memberUserIds
+            .map((uid) => responders.find((u) => u.uid === uid))
+            .filter((u): u is AgencyUser => !!u)
+          const available = responders.filter((u) => !team.memberUserIds.includes(u.uid))
+          return (
+            <div key={team.id} className="p-3 rounded-md border border-slate-200 bg-surface-alt space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-800">{team.name}</span>
+                <span className="badge border-slate-200 text-slate-500">{team.status}</span>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {memberUsers.length === 0 && (
+                  <span className="text-xs text-slate-400">No members yet</span>
+                )}
+                {memberUsers.map((u) => (
+                  <span key={u.uid} className="badge border-accent/30 text-accent gap-1.5">
+                    {u.displayName} · {ROLE_LABELS[u.role]}
+                    <button onClick={() => onRemoveMember(team.id, u.uid)} className="text-alert hover:text-red-700">×</button>
+                  </span>
+                ))}
+              </div>
+
+              {available.length > 0 && (
+                <div className="flex gap-1.5">
+                  <select className="input-field text-xs py-1"
+                    value={pendingUser[team.id] || ''}
+                    onChange={(e) => setPendingUser((p) => ({ ...p, [team.id]: e.target.value }))}>
+                    <option value="">— add a responder —</option>
+                    {available.map((u) => (
+                      <option key={u.uid} value={u.uid}>{u.displayName} ({ROLE_LABELS[u.role]})</option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-ghost text-xs flex-shrink-0"
+                    disabled={!pendingUser[team.id]}
+                    onClick={() => {
+                      const uid = pendingUser[team.id]
+                      if (!uid) return
+                      onAddMember(team.id, uid)
+                      setPendingUser((p) => ({ ...p, [team.id]: '' }))
+                    }}>
+                    Add
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function AgencyAdminDashboard() {
   const { token } = useAuth()
   const [users, setUsers]       = useState<AgencyUser[]>([])
+  const [teams, setTeams]       = useState<Team[]>([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
 
@@ -87,7 +202,12 @@ export default function AgencyAdminDashboard() {
     }
   }, [authHeaders])
 
-  useEffect(() => { fetchUsers() }, [fetchUsers])
+  const fetchTeams = useCallback(async () => {
+    const res = await fetch('/server/agency/teams', { headers: authHeaders() })
+    if (res.ok) setTeams(await res.json())
+  }, [authHeaders])
+
+  useEffect(() => { fetchUsers(); fetchTeams() }, [fetchUsers, fetchTeams])
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
@@ -126,12 +246,38 @@ export default function AgencyAdminDashboard() {
     fetchUsers()
   }
 
+  async function createTeam(teamName: string) {
+    await fetch('/server/agency/teams', {
+      method:  'POST',
+      headers: authHeaders(),
+      body:    JSON.stringify({ name: teamName }),
+    })
+    fetchTeams()
+  }
+
+  async function addMember(teamId: string, userId: string) {
+    await fetch(`/server/agency/teams/${teamId}/members`, {
+      method:  'POST',
+      headers: authHeaders(),
+      body:    JSON.stringify({ userId }),
+    })
+    fetchTeams()
+  }
+
+  async function removeMember(teamId: string, userId: string) {
+    await fetch(`/server/agency/teams/${teamId}/members/${userId}`, {
+      method:  'DELETE',
+      headers: authHeaders(),
+    })
+    fetchTeams()
+  }
+
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-slate-800">Agency Admin</h1>
-          <p className="text-sm text-slate-400 mt-1">Manage Command Staff and Field Responder accounts</p>
+          <p className="text-sm text-slate-400 mt-1">Manage Command Staff, Field Responder accounts, and teams</p>
         </div>
         <button className="btn-primary text-sm" onClick={() => setShowForm((s) => !s)}>
           {showForm ? 'Cancel' : '+ Add User'}
@@ -187,10 +333,13 @@ export default function AgencyAdminDashboard() {
       {loading ? (
         <p className="text-sm text-slate-400 text-center py-6">Loading…</p>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
-          <RoleGroup title="Command Staff" roles={COMMAND_STAFF_ROLES} users={users} onToggleActive={toggleActive} />
-          <RoleGroup title="Field Responders" roles={FIELD_RESPONDER_ROLES} users={users} onToggleActive={toggleActive} />
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <RoleGroup title="Command Staff" roles={COMMAND_STAFF_ROLES} users={users} onToggleActive={toggleActive} />
+            <RoleGroup title="Field Responders" roles={FIELD_RESPONDER_ROLES} users={users} onToggleActive={toggleActive} />
+          </div>
+          <TeamsPanel teams={teams} users={users} onCreateTeam={createTeam} onAddMember={addMember} onRemoveMember={removeMember} />
+        </>
       )}
     </div>
   )
