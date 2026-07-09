@@ -25,8 +25,8 @@ export default function Login() {
       await login(email, password)
       // Navigation to the right home route happens via the `if (user)` redirect above,
       // triggered by the context re-render — nothing else needed here.
-    } catch {
-      setError('Invalid credentials. Try commander@rescueeye.ph / password123')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid credentials. Try commander@rescueeye.ph / password123')
     } finally {
       setLoading(false)
     }

@@ -9,7 +9,7 @@
 ## Setup (Before Panel Enters)
 
 - [ ] Open RescueEye on laptop — full screen, 1920×1080
-- [ ] Login as `incident_commander` (`commander@rescueeye.ph` / `password123`)
+- [ ] Login as `command_staff` (`commander@rescueeye.ph` / `password123`)
 - [ ] Pre-load demo MP4 feed — verify stream is running (green LIVE ON badge)
 - [ ] Run seed script to reset to clean demo state: `node server/scripts/seed.js`
 - [ ] Have Evaluation Report open in a second browser tab (`/evaluation`)
@@ -24,9 +24,9 @@
 
 **What to say:**
 > "RescueEye begins at the command center login. Access is role-based —
-> incident commanders see the full system including drill controls and evaluation
-> reports. Drone operators see only their feed, and coordinators manage field
-> communications."
+> Command Staff use this web dashboard for the live feed, damage map,
+> coordination, drill controls, and evaluation reports. Field Responders
+> use a separate mobile app to accept and update missions."
 
 **Actions:**
 - Show the login screen (animated grid background, RescueEye logo)

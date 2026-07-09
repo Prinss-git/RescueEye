@@ -39,7 +39,7 @@ Relational schema for the RescueEye capstone manuscript. Table names are full de
 | `USER_Name` | VARCHAR(100) | NOT NULL | Display name |
 | `USER_Phone` | VARCHAR(20) | NULL | Mobile number, used for SMS alerts |
 | `USER_PasswordHash` | VARCHAR(255) | NOT NULL | Bcrypt-hashed password (never stored/returned in plaintext) |
-| `USER_Role` | VARCHAR(20) | NOT NULL | `SYSTEM_ADMIN`, `AGENCY_ADMIN`, `COMMAND_STAFF`, `SAR_RESPONDER`, `EMS_RESPONDER`, `DRONE_OPERATOR`, `COORDINATOR` |
+| `USER_Role` | VARCHAR(20) | NOT NULL | `SYSTEM_ADMIN`, `AGENCY_ADMIN`, `COMMAND_STAFF`, `FIELD_RESPONDER` |
 | `USER_AgencyID` | VARCHAR(20) | FK → `Agency.AGCY_ID`, NULL | The agency this account belongs to (NULL for System Admins) |
 | `USER_Org` | VARCHAR(100) | NULL | Organization/agency display name (denormalized copy of `Agency.AGCY_Name`) |
 | `USER_Active` | BOOLEAN | NOT NULL, DEFAULT TRUE | Whether the account can currently log in |
@@ -50,7 +50,7 @@ Relational schema for the RescueEye capstone manuscript. Table names are full de
 
 - **System Admin** is a platform-operator role, seeded once at deployment (not created through the app UI).
 - **System Admin → creates → Agency Admin**, together with the `Agency` record itself, in one combined onboarding step when an organization subscribes.
-- **Agency Admin → creates → Command Staff** (`incident_commander`, `drone_operator`, `coordinator`) **and Field Responders** (`sar_responder`, `ems_responder`), always scoped to their own `USER_AgencyID` — an Agency Admin can only see/manage users within their own agency.
+- **Agency Admin → creates → Command Staff** (`COMMAND_STAFF`, web dashboard) **and Field Responders** (`FIELD_RESPONDER`, mobile app), always scoped to their own `USER_AgencyID` — an Agency Admin can only see/manage users within their own agency.
 
 ## Drone
 

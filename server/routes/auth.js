@@ -5,18 +5,9 @@ const { verifyPassword, issueSession, revokeSession } = require('../lib/authz');
 
 const router = Router();
 
-// Role map for demo accounts (when Firebase Auth is not active)
-const DEMO_ACCOUNTS = {
-  'commander@rescueeye.ph':  { role: 'incident_commander', displayName: 'Cdr. Reyes',      organization: 'CDRRMO Cebu' },
-  'operator@rescueeye.ph':   { role: 'drone_operator',     displayName: 'Tech. Santos',    organization: 'CDRRMO Cebu' },
-  'coordinator@rescueeye.ph':{ role: 'coordinator',        displayName: 'Coord. Cruz',     organization: 'BFP Cebu' },
-  'sar@rescueeye.ph':        { role: 'sar_responder',      displayName: 'SAR Team Alpha',  organization: 'CDRRMO Cebu' },
-  'ems@rescueeye.ph':        { role: 'ems_responder',      displayName: 'EMS Team Bravo',  organization: 'Cebu City Health Office' },
-};
-
 /**
  * POST /auth/login
- * Accepts a Firebase ID token (idToken) or falls back to demo credentials.
+ * Accepts a Firebase ID token (idToken) or falls back to real credentials.
  */
 router.post('/login', async (req, res) => {
   const { email, password, idToken } = req.body;
@@ -34,13 +25,12 @@ router.post('/login', async (req, res) => {
           userDoc = snap.data();
         } else {
           // First login — create user document
-          const demo = DEMO_ACCOUNTS[decoded.email] || {};
           userDoc = {
             uid:          decoded.uid,
             email:        decoded.email,
             displayName:  decoded.name || decoded.email.split('@')[0],
-            role:         demo.role || 'coordinator',
-            organization: demo.organization || 'Unknown',
+            role:         'command_staff',
+            organization: 'Unknown',
             createdAt:    new Date().toISOString(),
             lastLogin:    new Date().toISOString(),
           };
@@ -52,7 +42,7 @@ router.post('/login', async (req, res) => {
         uid:         decoded.uid,
         email:       decoded.email,
         displayName: decoded.name || decoded.email.split('@')[0],
-        role:        'coordinator',
+        role:        'command_staff',
       };
       return res.json({ token: issueSession(finalUser), user: finalUser });
     } catch (err) {
@@ -80,19 +70,7 @@ router.post('/login', async (req, res) => {
     return res.json({ token: issueSession(realUser), user: safeUser });
   }
 
-  // Legacy demo accounts — any password accepted, unchanged behavior.
-  const demo = DEMO_ACCOUNTS[email];
-  if (!demo) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  const demoUser = {
-    uid:          `demo-${email.split('@')[0]}`,
-    email,
-    displayName:  demo.displayName,
-    role:         demo.role,
-    organization: demo.organization,
-  };
-  return res.json({ token: issueSession(demoUser), user: demoUser });
+  return res.status(401).json({ error: 'Invalid credentials' });
 });
 
 // POST /auth/logout

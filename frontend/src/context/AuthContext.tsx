@@ -3,8 +3,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react'
 interface User {
   uid: string
   email: string
-  role: 'incident_commander' | 'drone_operator' | 'coordinator' | 'sar_responder' | 'ems_responder'
-      | 'system_admin' | 'agency_admin'
+  role: 'system_admin' | 'agency_admin' | 'command_staff' | 'field_responder'
   displayName: string
   organization?: string
   agencyId?: string | null
@@ -34,6 +33,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })
     if (!res.ok) throw new Error('Invalid credentials')
     const data = await res.json()
+    if (data.user.role === 'field_responder') {
+      throw new Error('Field Responder accounts are for the RescueEye mobile app.')
+    }
     sessionStorage.setItem('rescueeye_user', JSON.stringify(data.user))
     sessionStorage.setItem('rescueeye_token', data.token)
     setUser(data.user)

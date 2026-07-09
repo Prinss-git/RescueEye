@@ -21,15 +21,12 @@ interface Team {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  incident_commander: 'Incident Commander',
-  drone_operator:      'Drone Operator',
-  coordinator:         'Coordinator',
-  sar_responder:       'Search & Rescue',
-  ems_responder:       'Emergency Medical',
+  command_staff:    'Command Staff',
+  field_responder:  'Field Responder',
 }
 
-const COMMAND_STAFF_ROLES = ['incident_commander', 'drone_operator', 'coordinator']
-const FIELD_RESPONDER_ROLES = ['sar_responder', 'ems_responder']
+const COMMAND_STAFF_ROLES = ['command_staff']
+const FIELD_RESPONDER_ROLES = ['field_responder']
 
 function RoleGroup({ title, roles, users, onToggleActive }: {
   title: string; roles: string[]; users: AgencyUser[]
@@ -184,7 +181,7 @@ export default function AgencyAdminDashboard() {
   const [name, setName]         = useState('')
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole]         = useState('incident_commander')
+  const [role, setRole]         = useState('command_staff')
   const [error, setError]       = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -227,7 +224,7 @@ export default function AgencyAdminDashboard() {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || 'Failed to create user')
       }
-      setName(''); setEmail(''); setPassword(''); setRole('incident_commander')
+      setName(''); setEmail(''); setPassword(''); setRole('command_staff')
       setShowForm(false)
       fetchUsers()
     } catch (err) {

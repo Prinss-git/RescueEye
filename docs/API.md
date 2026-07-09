@@ -135,7 +135,7 @@ Hot-swap individual model.
 {
   "token": "base64token",
   "user": { "uid": "...", "email": "...", "displayName": "Cdr. Reyes",
-            "role": "incident_commander", "organization": "CDRRMO Cebu" }
+            "role": "command_staff", "organization": "CDRRMO Cebu" }
 }
 ```
 

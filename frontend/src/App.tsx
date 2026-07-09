@@ -12,7 +12,7 @@ import EvaluationReport from './screens/EvaluationReport'
 import SystemAdminDashboard from './screens/SystemAdminDashboard'
 import AgencyAdminDashboard from './screens/AgencyAdminDashboard'
 
-const OPERATIONAL_ROLES = ['incident_commander', 'drone_operator', 'coordinator', 'sar_responder', 'ems_responder']
+const OPERATIONAL_ROLES = ['command_staff']
 
 function DefaultRedirect() {
   const { user } = useAuth()

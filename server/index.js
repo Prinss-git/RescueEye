@@ -1,18 +1,7 @@
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-
-const store         = require('./lib/store');
+const app   = require('./app');
+const store = require('./lib/store');
 const { hashPassword } = require('./lib/authz');
-const authRoutes    = require('./routes/auth');
-const teamsRoutes   = require('./routes/teams');
-const messagesRoutes = require('./routes/messages');
-const incidentsRoutes = require('./routes/incidents');
-const drillRoutes   = require('./routes/drill');
-const evalRoutes    = require('./routes/evaluation');
-const adminRoutes   = require('./routes/admin');
-const agencyRoutes  = require('./routes/agency');
-const missionsRoutes = require('./routes/missions');
 
 // ── Firebase Admin SDK ────────────────────────────────────────────────────────
 let firebaseAdmin = null;
@@ -33,43 +22,9 @@ if (credPath) {
   console.warn('[firebase] FIREBASE_CREDENTIAL_PATH not set — in-memory mode');
 }
 
-// ── Express app ───────────────────────────────────────────────────────────────
-const app  = express();
-const PORT = process.env.PORT || 3001;
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',');
-
-app.use(cors({ origin: allowedOrigins, credentials: true }));
-app.use(express.json());
-
-// Make firebaseAdmin accessible in route handlers via req.app.get()
 app.set('firebaseAdmin', firebaseAdmin);
 
-app.get('/health', (_req, res) => {
-  res.json({
-    status:    'ok',
-    service:   'rescueeye-server',
-    version:   '0.4.0',
-    phase:     '4-coordination',
-    firebase:  !!firebaseAdmin,
-    drillActive: !!store.getActiveDrill(),
-  });
-});
-
-app.use('/auth',       authRoutes);
-app.use('/teams',      teamsRoutes);
-app.use('/messages',   messagesRoutes);
-app.use('/incidents',  incidentsRoutes);
-app.use('/drill',      drillRoutes);
-app.use('/evaluation', evalRoutes);
-app.use('/admin',      adminRoutes);
-app.use('/agency',     agencyRoutes);
-app.use('/missions',   missionsRoutes);
-
-// Global error handler
-app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+const PORT = process.env.PORT || 3001;
 
 // ── Startup sequence ──────────────────────────────────────────────────────────
 // Hydration must complete (or gracefully fail) before the bootstrap System
@@ -103,6 +58,38 @@ async function start() {
     console.log(`[bootstrap] System Admin created — ${email} / (see BOOTSTRAP_ADMIN_PASSWORD)`);
   } else {
     console.log(`[bootstrap] System Admin already present — ${email}`);
+  }
+
+  // Seed one demo agency + one demo account per remaining role, so the app
+  // is fully explorable out of the box without going through the admin UI.
+  let demoAgency = store.getAgencies().find((a) => a.name === 'CDRRMO Cebu Demo');
+  if (!demoAgency) {
+    demoAgency = store.createAgency({
+      name:               'CDRRMO Cebu Demo',
+      subscriptionStatus: 'ACTIVE',
+      createdBy:          'bootstrap',
+    });
+  }
+
+  const demoAccounts = [
+    { email: 'agencyadmin@rescueeye.ph', displayName: 'Demo Agency Admin', role: 'agency_admin',   agencyId: demoAgency.id },
+    { email: 'commander@rescueeye.ph',   displayName: 'Cdr. Reyes',        role: 'command_staff',  agencyId: demoAgency.id },
+    { email: 'responder@rescueeye.ph',   displayName: 'Field Responder',   role: 'field_responder', agencyId: demoAgency.id },
+  ];
+  for (const acc of demoAccounts) {
+    if (store.getUserByEmail(acc.email)) {
+      console.log(`[bootstrap] Demo account already present — ${acc.email}`);
+      continue;
+    }
+    store.createUser({
+      email:        acc.email,
+      displayName:  acc.displayName,
+      role:         acc.role,
+      organization: demoAgency.name,
+      agencyId:     acc.agencyId,
+      passwordHash: await hashPassword('password123'),
+    });
+    console.log(`[bootstrap] Demo account created — ${acc.email} (${acc.role})`);
   }
 
   app.listen(PORT, () => {

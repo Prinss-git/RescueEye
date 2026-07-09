@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { useNavigation, useRoute } from '@react-navigation/native'
 import { SERVER_BASE } from '../config'
-import { useAuth } from '../context/AuthContext'
 import { colors, font, radius, spacing } from '../theme'
 
 interface Mission {
@@ -42,7 +41,6 @@ const SEVERITY_COLOR: Record<string, string> = {
 }
 
 export default function MissionDetailScreen() {
-  const { user } = useAuth()
   const navigation = useNavigation<any>()
   const route = useRoute<any>()
   const { missionId } = route.params
@@ -117,8 +115,6 @@ export default function MissionDetailScreen() {
     )
   }
 
-  const isEms = user?.role === 'ems_responder'
-
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
       <View style={s.card}>
@@ -167,20 +163,7 @@ export default function MissionDetailScreen() {
           </TouchableOpacity>
         )}
 
-        {mission.status === 'ON_SITE' && isEms && (
-          <View style={s.row}>
-            <TouchableOpacity style={[s.actionBtn, s.acceptBtn]}
-              onPress={() => updateStatus('TREATING', { medicalRequired: true })} disabled={busy}>
-              <Text style={s.acceptBtnText}>PROVIDE TREATMENT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.actionBtn, s.declineBtn]}
-              onPress={() => updateStatus('COMPLETED', { medicalRequired: false })} disabled={busy}>
-              <Text style={s.declineBtnText}>NO TREATMENT NEEDED</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {mission.status === 'ON_SITE' && !isEms && (
+        {mission.status === 'ON_SITE' && (
           <TouchableOpacity style={s.primaryBtn} onPress={() => updateStatus('COMPLETED')} disabled={busy}>
             <Text style={s.primaryBtnText}>REPORT RESCUE COMPLETE</Text>
           </TouchableOpacity>

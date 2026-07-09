@@ -4,13 +4,10 @@ import { LogOut } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const ROLE_LABELS: Record<string, string> = {
-  incident_commander: 'Incident Commander',
-  drone_operator:      'Drone Operator',
-  coordinator:         'Coordinator',
-  sar_responder:       'Search & Rescue',
-  ems_responder:       'Emergency Medical',
-  system_admin:        'System Admin',
-  agency_admin:        'Agency Admin',
+  system_admin:     'System Admin',
+  agency_admin:     'Agency Admin',
+  command_staff:    'Command Staff',
+  field_responder:  'Field Responder',
 }
 
 export default function Navbar() {

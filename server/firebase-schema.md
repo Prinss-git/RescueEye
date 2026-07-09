@@ -6,7 +6,7 @@
   uid:          string,          // Firebase Auth UID
   email:        string,
   displayName:  string,
-  role:         'incident_commander' | 'drone_operator' | 'coordinator',
+  role:         'system_admin' | 'agency_admin' | 'command_staff' | 'field_responder',
   organization: string,          // e.g. "CDRRMO Cebu"
   createdAt:    Timestamp,
   lastLogin:    Timestamp
@@ -77,7 +77,7 @@
 
 ## Security Rules (summary)
 - All reads/writes require `request.auth != null`
-- Only `incident_commander` role can start/stop drills
+- Only `command_staff` role can start/stop drills
 - Messages: any authenticated user can read; only authenticated users can write their own messages
-- Teams: any authenticated user can read; only `incident_commander` or `coordinator` can PATCH status
+- Teams: any authenticated user can read; only `command_staff` can PATCH status
 - All Firestore writes must go through the Node.js server, never directly from the frontend

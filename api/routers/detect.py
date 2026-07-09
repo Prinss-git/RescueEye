@@ -472,12 +472,13 @@ async def detect_objects(payload: dict = Body(...)):
             for d in detections
         ], dtype=np.float32)
         tracked = _tracker.update(det_arr)  # [M, 6]: x1,y1,x2,y2,score,track_id
+        tracked_label = "life_sign" if mode == "thermal" else "person"
         detections = []
         for row in tracked:
             x1, y1, x2, y2, score, tid = row
             fh, fw = frame.shape[:2]
             detections.append({
-                "class":      "person",
+                "class":      tracked_label,
                 "confidence": round(float(score), 3),
                 "track_id":   int(tid),
                 "bbox":       {

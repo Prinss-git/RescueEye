@@ -218,7 +218,7 @@ export default function CoordinationPanel() {
     } catch {}
   }
 
-  // ── Drill toggle (incident_commander only) ──────────────────────────────────
+  // ── Drill toggle (command_staff only) ────────────────────────────────────────
   async function toggleDrill() {
     const endpoint = drillActive ? '/server/drill/stop' : '/server/drill/start'
     try {
@@ -244,7 +244,7 @@ export default function CoordinationPanel() {
       <div className="w-80 flex flex-col panel overflow-hidden">
         <div className="panel-header flex items-center justify-between">
           <span>INCIDENTS ({incidents.filter(i => i.status !== 'RESOLVED').length})</span>
-          {user?.role === 'incident_commander' && (
+          {user?.role === 'command_staff' && (
             <button
               onClick={toggleDrill}
               className={`text-xs font-medium px-2 py-0.5 rounded-full border transition-all ${

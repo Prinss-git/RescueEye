@@ -6,7 +6,7 @@ const router = Router();
 
 // POST /drill/start
 router.post('/start', (req, res) => {
-  const userId = req.body.userId || 'incident_commander';
+  const userId = req.body.userId || 'command_staff';
   const session = store.startDrill(userId);
   res.status(201).json(session);
 });

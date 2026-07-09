@@ -20,12 +20,13 @@ This document covers how to conduct the 20-participant drill evaluation (Capston
 
 Create accounts for all participants in Firebase Auth (or use demo mode).
 
-**Demo accounts (no Firebase required):**
+**Demo accounts (seeded automatically on server startup):**
 | Email | Password | Role |
 |-------|----------|------|
-| `commander@rescueeye.ph` | `password123` | incident_commander |
-| `operator@rescueeye.ph`  | `password123` | drone_operator |
-| `coordinator@rescueeye.ph` | `password123` | coordinator |
+| `sysadmin@rescueeye.ph`     | `admin12345` | system_admin |
+| `agencyadmin@rescueeye.ph`  | `password123` | agency_admin |
+| `commander@rescueeye.ph`    | `password123` | command_staff |
+| `responder@rescueeye.ph`    | `password123` | field_responder (mobile app) |
 
 For a full 20-participant evaluation, create accounts in Firebase Auth and set custom claims for each role. Then update `server/routes/auth.js` with participant emails.
 

@@ -5,15 +5,9 @@ const { hashPassword, requireAuth, requireRole } = require('../lib/authz');
 
 const router = Router();
 
-const CREATABLE_ROLES = [
-  'incident_commander',
-  'drone_operator',
-  'coordinator',
-  'sar_responder',
-  'ems_responder',
-];
+const CREATABLE_ROLES = ['command_staff', 'field_responder'];
 
-const TEAM_MEMBER_ROLES = ['sar_responder', 'ems_responder'];
+const TEAM_MEMBER_ROLES = ['field_responder'];
 
 router.use(requireAuth, requireRole('agency_admin'));
 

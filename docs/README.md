@@ -117,7 +117,7 @@ This creates 6 incidents, assigns 2 teams, and adds 10 seed messages.
 
 ## Starting a Drill Session
 
-1. Log in as `incident_commander`
+1. Log in as `command_staff`
 2. Navigate to **Coordination**
 3. Click **START DRILL** in the Incidents panel header
 4. The system auto-generates simulated incidents every 30 seconds

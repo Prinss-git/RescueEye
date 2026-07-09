@@ -49,19 +49,17 @@ export const radius = {
   pill: 20,
 }
 
-// Role labels/colors for the 5 RescueEye account roles.
+// Role labels/colors for the 4 RescueEye account roles.
 export const ROLE_LABELS: Record<string, string> = {
-  incident_commander: 'INCIDENT COMMANDER',
-  drone_operator:      'DRONE OPERATOR',
-  coordinator:         'COORDINATOR',
-  sar_responder:       'SEARCH & RESCUE',
-  ems_responder:       'EMERGENCY MEDICAL',
+  system_admin:     'SYSTEM ADMIN',
+  agency_admin:     'AGENCY ADMIN',
+  command_staff:    'COMMAND STAFF',
+  field_responder:  'FIELD RESPONDER',
 }
 
 export const ROLE_COLORS: Record<string, string> = {
-  incident_commander: colors.cyan,
-  drone_operator:      colors.orangeAlt,
-  coordinator:         colors.amber,
-  sar_responder:       colors.green,
-  ems_responder:       colors.alert,
+  system_admin:     colors.cyanDim,
+  agency_admin:     colors.amber,
+  command_staff:    colors.cyan,
+  field_responder:  colors.green,
 }
