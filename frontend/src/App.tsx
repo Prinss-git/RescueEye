@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import ProtectedRoute, { getHomeRoute } from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import PageTransition from './components/PageTransition'
+import Landing from './screens/Landing'
 import Login from './screens/Login'
 import Dashboard from './screens/Dashboard'
 import DamageMap from './screens/DamageMap'
@@ -16,7 +17,7 @@ const OPERATIONAL_ROLES = ['command_staff']
 
 function DefaultRedirect() {
   const { user } = useAuth()
-  return <Navigate to={user ? getHomeRoute(user.role) : '/login'} replace />
+  return <Navigate to={user ? getHomeRoute(user.role) : '/'} replace />
 }
 
 function AnimatedRoutes() {
@@ -24,6 +25,7 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait" initial={false}>
       <Routes location={location} key={location.pathname}>
+        <Route path="/"      element={<PageTransition><Landing /></PageTransition>} />
         <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
 
         <Route element={<ProtectedRoute allowedRoles={OPERATIONAL_ROLES} />}>
