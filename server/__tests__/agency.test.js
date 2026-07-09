@@ -95,4 +95,123 @@ describe('POST /agency/users (agency_admin)', () => {
       .send({ active: false });
     expect(patch.status).toBe(404);
   });
+
+  test('agency admin can edit a managed user\'s name/email', async () => {
+    const agencyId = `AGCY-edit-${Date.now()}`;
+    const { token } = await createTestUser('agency_admin', { agencyId });
+    const { user } = await createTestUser('field_responder', { agencyId });
+
+    const res = await request(app)
+      .patch(`/agency/users/${user.uid}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Renamed Responder', email: `renamed-${Date.now()}@test.ph` });
+
+    expect(res.status).toBe(200);
+    expect(res.body.displayName).toBe('Renamed Responder');
+  });
+
+  test('agency admin edit rejects an email already used by someone else', async () => {
+    const agencyId = `AGCY-edit-${Date.now()}`;
+    const { token } = await createTestUser('agency_admin', { agencyId });
+    const { user: userA } = await createTestUser('field_responder', { agencyId });
+    const { user: userB } = await createTestUser('field_responder', { agencyId });
+
+    const res = await request(app)
+      .patch(`/agency/users/${userA.uid}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ email: userB.email });
+
+    expect(res.status).toBe(409);
+  });
+
+  test('agency admin can reset a managed user\'s password', async () => {
+    const agencyId = `AGCY-pw-${Date.now()}`;
+    const { token } = await createTestUser('agency_admin', { agencyId });
+    const { user } = await createTestUser('field_responder', { agencyId });
+
+    const reset = await request(app)
+      .patch(`/agency/users/${user.uid}/password`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: 'brand-new-pass' });
+    expect(reset.status).toBe(200);
+
+    const login = await request(app)
+      .post('/auth/login')
+      .send({ email: user.email, password: 'brand-new-pass' });
+    expect(login.status).toBe(200);
+  });
+});
+
+describe('System Admin agency management', () => {
+  async function createRealAgency(sysToken) {
+    const res = await request(app)
+      .post('/admin/agencies')
+      .set('Authorization', `Bearer ${sysToken}`)
+      .send({
+        agencyName:    `Manage Agency ${Date.now()}`,
+        adminName:     'Real Admin',
+        adminEmail:    `real-admin-${Date.now()}@test.ph`,
+        adminPassword: 'pass123456',
+      });
+    return res.body;
+  }
+
+  test('renames an agency', async () => {
+    const { token } = await createTestUser('system_admin');
+    const { agency } = await createRealAgency(token);
+
+    const res = await request(app)
+      .patch(`/admin/agencies/${agency.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Renamed Agency' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('Renamed Agency');
+  });
+
+  test('resets an agency admin\'s password', async () => {
+    const { token } = await createTestUser('system_admin');
+    const { agency, admin } = await createRealAgency(token);
+
+    const reset = await request(app)
+      .patch(`/admin/agencies/${agency.id}/admin-password`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: 'reset-pass-123' });
+    expect(reset.status).toBe(200);
+
+    const login = await request(app)
+      .post('/auth/login')
+      .send({ email: admin.email, password: 'reset-pass-123' });
+    expect(login.status).toBe(200);
+  });
+
+  test('deletes an empty (no dispatched teams) agency', async () => {
+    const { token } = await createTestUser('system_admin');
+    const { agency } = await createRealAgency(token);
+
+    const del = await request(app)
+      .delete(`/admin/agencies/${agency.id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(200);
+
+    const list = await request(app).get('/admin/agencies').set('Authorization', `Bearer ${token}`);
+    expect(list.body.find(a => a.id === agency.id)).toBeUndefined();
+  });
+
+  test('blocks deleting an agency with a dispatched team', async () => {
+    const { token } = await createTestUser('system_admin');
+    const { agency } = await createRealAgency(token);
+    const { token: agencyAdminToken } = await createTestUser('agency_admin', { agencyId: agency.id });
+
+    const teamRes = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${agencyAdminToken}`)
+      .send({ name: 'Dispatch Team' });
+    await request(app).patch(`/teams/${teamRes.body.id}/status`).send({ status: 'DISPATCHED' });
+
+    const del = await request(app)
+      .delete(`/admin/agencies/${agency.id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(400);
+  });
 });

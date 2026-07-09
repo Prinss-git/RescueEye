@@ -129,3 +129,80 @@ describe('Mission state machine', () => {
     expect(res.body.every(m => m.responderUserIds.includes(sar.uid))).toBe(true);
   });
 });
+
+describe('GET /agency/missions — mission history', () => {
+  test('returns only the caller\'s own agency missions, enriched with team/incident context', async () => {
+    const agencyId = `AGCY-mh-${Date.now()}`;
+    const { token: agencyToken } = await createTestUser('agency_admin', { agencyId });
+    const { user: sar } = await createTestUser('field_responder', { agencyId });
+    const { user: commander } = await createTestUser('command_staff', { agencyId });
+
+    const teamRes = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${agencyToken}`)
+      .send({ name: 'History Team' });
+    await request(app).post(`/agency/teams/${teamRes.body.id}/members`)
+      .set('Authorization', `Bearer ${agencyToken}`).send({ userId: sar.uid });
+
+    const incident = await createIncident({ type: 'FIRE', severity: 'HIGH' });
+    await request(app).patch(`/teams/${teamRes.body.id}/assign`).send({ incidentId: incident.id, assignedBy: commander.uid });
+
+    const res = await request(app).get('/agency/missions').set('Authorization', `Bearer ${agencyToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    expect(res.body[0].teamName).toBe('History Team');
+    expect(res.body[0].incidentType).toBe('FIRE');
+    expect(res.body[0].agencyId).toBe(agencyId);
+  });
+
+  test('does not include another agency\'s missions', async () => {
+    const agencyA = `AGCY-mh-a-${Date.now()}`;
+    const agencyB = `AGCY-mh-b-${Date.now()}`;
+    const { token: tokenA } = await createTestUser('agency_admin', { agencyId: agencyA });
+    const { token: tokenB } = await createTestUser('agency_admin', { agencyId: agencyB });
+    const { user: commanderB } = await createTestUser('command_staff', { agencyId: agencyB });
+
+    const teamB = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ name: 'Agency B Team' });
+    const incident = await createIncident();
+    await request(app).patch(`/teams/${teamB.body.id}/assign`).send({ incidentId: incident.id, assignedBy: commanderB.uid });
+
+    const res = await request(app).get('/agency/missions').set('Authorization', `Bearer ${tokenA}`);
+    expect(res.body.every(m => m.agencyId === agencyA)).toBe(true);
+  });
+});
+
+describe('GET /admin/missions — system-wide mission overview', () => {
+  test('returns missions across all agencies with agency name attached', async () => {
+    const { token: sysToken } = await createTestUser('system_admin');
+
+    const agencyRes = await request(app)
+      .post('/admin/agencies')
+      .set('Authorization', `Bearer ${sysToken}`)
+      .send({
+        agencyName:    `Overview Agency ${Date.now()}`,
+        adminName:     'Overview Admin',
+        adminEmail:    `overview-admin-${Date.now()}@test.ph`,
+        adminPassword: 'pass123456',
+      });
+    const { agency, admin } = agencyRes.body;
+    const agencyLogin = await request(app).post('/auth/login').send({ email: admin.email, password: 'pass123456' });
+    const agencyToken = agencyLogin.body.token;
+    const { user: commander } = await createTestUser('command_staff', { agencyId: agency.id });
+
+    const teamRes = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${agencyToken}`)
+      .send({ name: 'Overview Team' });
+    const incident = await createIncident();
+    await request(app).patch(`/teams/${teamRes.body.id}/assign`).send({ incidentId: incident.id, assignedBy: commander.uid });
+
+    const res = await request(app).get('/admin/missions').set('Authorization', `Bearer ${sysToken}`);
+    expect(res.status).toBe(200);
+    const found = res.body.find(m => m.agencyId === agency.id);
+    expect(found).toBeTruthy();
+    expect(found.agencyName).toBe(agency.name);
+  });
+});

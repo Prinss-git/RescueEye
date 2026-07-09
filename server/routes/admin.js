@@ -68,4 +68,51 @@ router.patch('/agencies/:id/status', (req, res) => {
   res.json(agency);
 });
 
+// PATCH /admin/agencies/:id — rename an agency
+router.patch('/agencies/:id', (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+
+  const agency = store.renameAgency(req.params.id, name.trim());
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
+  res.json(agency);
+});
+
+// DELETE /admin/agencies/:id — cascade-deletes the agency, its users, and its teams
+router.delete('/agencies/:id', (req, res) => {
+  const agency = store.getAgencyById(req.params.id);
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
+
+  const teams = store.getTeams({ agencyId: agency.id });
+  if (teams.some((t) => t.status !== 'STANDBY')) {
+    return res.status(400).json({ error: 'Cannot delete an agency with teams currently dispatched' });
+  }
+
+  store.deleteAgencyCascade(agency.id);
+  res.json({ success: true });
+});
+
+// PATCH /admin/agencies/:id/admin-password — reset the agency's admin's password
+router.patch('/agencies/:id/admin-password', async (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: 'password is required' });
+
+  const agencyUsers = store.getUsers({ agencyId: req.params.id });
+  const admin = agencyUsers.find((u) => u.role === 'agency_admin');
+  if (!admin) return res.status(404).json({ error: 'No agency admin found for this agency' });
+
+  const passwordHash = await hashPassword(password);
+  store.setUserPassword(admin.uid, passwordHash);
+  res.json({ success: true });
+});
+
+// GET /admin/missions — every mission system-wide, with owning agency name attached
+router.get('/missions', (_req, res) => {
+  const missions = store.getMissionsEnriched().map((m) => {
+    const agency = m.agencyId ? store.getAgencyById(m.agencyId) : null;
+    return { ...m, agencyName: agency ? agency.name : null };
+  });
+  res.json(missions);
+});
+
 module.exports = router;

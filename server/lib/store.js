@@ -100,6 +100,14 @@ function removeTeamMember(teamId, userId) {
   return _withDisplayMembers(team);
 }
 
+function deleteTeam(teamId) {
+  const idx = teams.findIndex(t => t.id === teamId);
+  if (idx === -1) return false;
+  teams.splice(idx, 1);
+  _deleteDoc('teams', teamId);
+  return true;
+}
+
 function updateTeamStatus(teamId, status) {
   const team = teams.find(t => t.id === teamId);
   if (!team) return null;
@@ -258,6 +266,38 @@ function setAgencySubscriptionStatus(id, status) {
   return agency;
 }
 
+function renameAgency(id, name) {
+  const agency = agencies.find(a => a.id === id);
+  if (!agency) return null;
+  agency.name = name;
+  agency.updatedAt = new Date().toISOString();
+  _syncAgency(agency);
+  return agency;
+}
+
+// Removes the agency plus all its users and teams. Every agency has at
+// least one user (its own admin) from the moment it's created, so a
+// non-cascading delete would never actually be usable.
+function deleteAgencyCascade(id) {
+  for (let i = users.length - 1; i >= 0; i--) {
+    if (users[i].agencyId === id) {
+      const [removed] = users.splice(i, 1);
+      _deleteDoc('users', removed.uid);
+    }
+  }
+  for (let i = teams.length - 1; i >= 0; i--) {
+    if (teams[i].agencyId === id) {
+      const [removed] = teams.splice(i, 1);
+      _deleteDoc('teams', removed.id);
+    }
+  }
+  const idx = agencies.findIndex(a => a.id === id);
+  if (idx === -1) return false;
+  agencies.splice(idx, 1);
+  _deleteDoc('agencies', id);
+  return true;
+}
+
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 function getUsers(filter = {}) {
@@ -309,6 +349,23 @@ function setUserActive(uid, active) {
   return user;
 }
 
+function setUserPassword(uid, passwordHash) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  user.passwordHash = passwordHash;
+  _syncUser(user);
+  return user;
+}
+
+function updateUser(uid, updates) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  if (updates.displayName !== undefined) user.displayName = updates.displayName;
+  if (updates.email !== undefined) user.email = updates.email;
+  _syncUser(user);
+  return user;
+}
+
 // ── Missions ──────────────────────────────────────────────────────────────────
 
 const MISSION_TERMINAL_STATUSES = ['COMPLETED', 'DECLINED'];
@@ -342,6 +399,24 @@ function createMission(data) {
   missions.push(mission);
   _syncMission(mission);
   return mission;
+}
+
+// Joins missions with their team/incident context. Missions don't carry
+// agencyId directly — it's derived via teamId → team.agencyId.
+function getMissionsEnriched(filter = {}) {
+  let list = missions.map((m) => {
+    const team = teams.find(t => t.id === m.teamId);
+    const incident = incidents.find(i => i.id === m.incidentId);
+    return {
+      ...m,
+      teamName:         team ? team.name : null,
+      agencyId:         team ? team.agencyId : null,
+      incidentType:     incident ? incident.type : null,
+      incidentSeverity: incident ? incident.severity : null,
+    };
+  });
+  if (filter.agencyId) list = list.filter(m => m.agencyId === filter.agencyId);
+  return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 function updateMissionStatus(id, updates) {
@@ -500,6 +575,15 @@ async function _syncMission(mission) {
   }
 }
 
+async function _deleteDoc(collection, id) {
+  if (!_db) return;
+  try {
+    await _db.collection(collection).doc(id).delete();
+  } catch (e) {
+    console.warn(`[store] Firestore ${collection} delete failed:`, e.message);
+  }
+}
+
 // ── Hydration ─────────────────────────────────────────────────────────────────
 // Reads existing Firestore data into the in-memory arrays at startup, so the
 // in-memory store becomes a warm cache of Firestore rather than the source of
@@ -567,6 +651,7 @@ module.exports = {
   addTeamMember,
   removeTeamMember,
   updateTeamStatus,
+  deleteTeam,
   assignTeam,
   getIncidents,
   getIncidentById,
@@ -578,13 +663,18 @@ module.exports = {
   getAgencyById,
   createAgency,
   setAgencySubscriptionStatus,
+  renameAgency,
+  deleteAgencyCascade,
   getUsers,
   getUserByEmail,
   getUserById,
   createUser,
   touchUserLogin,
   setUserActive,
+  setUserPassword,
+  updateUser,
   getMissions,
+  getMissionsEnriched,
   getMissionById,
   createMission,
   updateMissionStatus,

@@ -85,4 +85,55 @@ describe('POST /agency/teams + roster management', () => {
     expect(listA.body.every(t => t.agencyId === agencyA)).toBe(true);
     expect(listA.body.some(t => t.name === 'B Team')).toBe(false);
   });
+
+  test('deletes a STANDBY team', async () => {
+    const agencyId = `AGCY-del-${Date.now()}`;
+    const { token } = await createTestUser('agency_admin', { agencyId });
+
+    const teamRes = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Deletable Team' });
+
+    const del = await request(app)
+      .delete(`/agency/teams/${teamRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(200);
+
+    const list = await request(app).get('/agency/teams').set('Authorization', `Bearer ${token}`);
+    expect(list.body.find(t => t.id === teamRes.body.id)).toBeUndefined();
+  });
+
+  test('blocks deleting a dispatched team', async () => {
+    const agencyId = `AGCY-del2-${Date.now()}`;
+    const { token } = await createTestUser('agency_admin', { agencyId });
+
+    const teamRes = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Busy Team' });
+    await request(app).patch(`/teams/${teamRes.body.id}/status`).send({ status: 'DISPATCHED' });
+
+    const del = await request(app)
+      .delete(`/agency/teams/${teamRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(400);
+  });
+
+  test('cannot delete a team belonging to another agency', async () => {
+    const agencyA = `AGCY-delx-a-${Date.now()}`;
+    const agencyB = `AGCY-delx-b-${Date.now()}`;
+    const { token: tokenA } = await createTestUser('agency_admin', { agencyId: agencyA });
+    const { token: tokenB } = await createTestUser('agency_admin', { agencyId: agencyB });
+
+    const teamB = await request(app)
+      .post('/agency/teams')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ name: 'Agency B Team' });
+
+    const del = await request(app)
+      .delete(`/agency/teams/${teamB.body.id}`)
+      .set('Authorization', `Bearer ${tokenA}`);
+    expect(del.status).toBe(404);
+  });
 });

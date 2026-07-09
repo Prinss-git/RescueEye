@@ -67,6 +67,45 @@ router.patch('/users/:id/active', (req, res) => {
   res.json(toSafeUser(updated));
 });
 
+// PATCH /agency/users/:id — edit a managed user's name/email
+router.patch('/users/:id', (req, res) => {
+  const { name, email } = req.body;
+
+  const target = store.getUserById(req.params.id);
+  if (!target || target.agencyId !== req.user.agencyId) {
+    return res.status(404).json({ error: 'User not found in your agency' });
+  }
+  if (email) {
+    const existing = store.getUserByEmail(email);
+    if (existing && existing.uid !== target.uid) {
+      return res.status(409).json({ error: 'A user with this email already exists' });
+    }
+  }
+
+  const updated = store.updateUser(req.params.id, { displayName: name, email });
+  res.json(toSafeUser(updated));
+});
+
+// PATCH /agency/users/:id/password — reset a managed user's password
+router.patch('/users/:id/password', async (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: 'password is required' });
+
+  const target = store.getUserById(req.params.id);
+  if (!target || target.agencyId !== req.user.agencyId) {
+    return res.status(404).json({ error: 'User not found in your agency' });
+  }
+
+  const passwordHash = await hashPassword(password);
+  store.setUserPassword(req.params.id, passwordHash);
+  res.json({ success: true });
+});
+
+// GET /agency/missions — mission history for the caller's own agency
+router.get('/missions', (req, res) => {
+  res.json(store.getMissionsEnriched({ agencyId: req.user.agencyId }));
+});
+
 // GET /agency/teams — list the caller's agency's teams
 router.get('/teams', (req, res) => {
   res.json(store.getTeams({ agencyId: req.user.agencyId }));
@@ -112,6 +151,20 @@ router.delete('/teams/:teamId/members/:userId', (req, res) => {
 
   const updated = store.removeTeamMember(req.params.teamId, req.params.userId);
   res.json(updated);
+});
+
+// DELETE /agency/teams/:teamId — delete a team (only while STANDBY, not mid-dispatch)
+router.delete('/teams/:teamId', (req, res) => {
+  const team = store.getTeamById(req.params.teamId);
+  if (!team || team.agencyId !== req.user.agencyId) {
+    return res.status(404).json({ error: 'Team not found in your agency' });
+  }
+  if (team.status !== 'STANDBY') {
+    return res.status(400).json({ error: 'Cannot delete a team that is currently dispatched' });
+  }
+
+  store.deleteTeam(req.params.teamId);
+  res.json({ success: true });
 });
 
 module.exports = router;
