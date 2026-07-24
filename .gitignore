@@ -17,6 +17,9 @@ dist/
 build/
 .vite/
 
+# Agency registration documents (user-submitted, never committed)
+server/uploads/
+
 # Misc
 .DS_Store
 Thumbs.db

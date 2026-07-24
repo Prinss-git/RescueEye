@@ -1,0 +1,228 @@
+RescueEye — Entity Relationship Design
+========================================
+Finalized: 10 tables
+
+TABLES AND FIELDS
+========================================
+
+PLATFORM_ADMIN
+--------------
+  Admin_ID               PK
+  Admin_Email
+  Admin_PasswordHash
+  Admin_Name
+  Admin_CreatedAt
+  Admin_LastLogin
+
+AGENCY
+------
+  Agency_ID                  PK
+  Agency_Name
+  Agency_RegistrationStatus  enum: PENDING, APPROVED, REJECTED
+  Agency_SubscriptionStatus  enum: ACTIVE, EXPIRED, SUSPENDED
+  Agency_CreatedBy           FK -> USER  (agency_admin who self-registered)
+  Agency_CreatedAt
+  Agency_ValidatedBy         FK -> PLATFORM_ADMIN  (nullable until reviewed)
+  Agency_ValidatedAt
+
+USER
+----
+  User_ID               PK
+  User_Email
+  User_PasswordHash
+  User_Name
+  User_Phone
+  User_Role              enum: agency_admin, command_staff, field_responder
+  User_AgencyID          FK -> AGENCY
+  User_Active
+  User_DutyStatus        enum: AVAILABLE, ON_DUTY, OFF_DUTY
+  User_CreatedAt
+  User_LastLogin
+
+DRONE
+-----
+  Drone_ID               PK
+  Drone_Callsign
+  Drone_Status
+  Drone_AddedBy          FK -> USER  (command_staff who registered the drone)
+  Drone_LastLat
+  Drone_LastLng
+  Drone_LastFeedAt
+
+DETECTION
+---------
+  Detection_ID           PK
+  Detection_DroneID      FK -> DRONE
+  Detection_Class
+  Detection_Confidence
+  Detection_BBoxJSON
+  Detection_ModelName
+  Detection_ModelVersion
+  Detection_Lat
+  Detection_Lng
+  Detection_Timestamp
+  Detection_ReviewStatus
+  Detection_ReviewedBy   FK -> USER
+  Detection_ReviewedAt
+
+MEDIA
+-----
+  Media_ID               PK
+  Media_DetectionID      FK -> DETECTION (nullable)
+  Media_IncidentID       FK -> INCIDENT (nullable)
+  Media_Type             photo | video
+  Media_URL
+  Media_UploadedBy       FK -> USER
+  Media_UploadedAt
+
+INCIDENT
+--------
+  Incident_ID            PK
+  Incident_DetectionID   FK -> DETECTION (nullable)
+  Incident_AgencyID      FK -> AGENCY
+  Incident_Type
+  Incident_Severity
+  Incident_Status
+  Incident_Lat
+  Incident_Lng
+  Incident_Description
+  Incident_ReportedBy    FK -> USER
+  Incident_CreatedAt
+  Incident_ResolvedAt
+
+RESPONSE
+--------
+  Response_ID            PK
+  Response_IncidentID    FK -> INCIDENT
+  Response_UserID        FK -> USER
+  Response_Status        enum: ASSIGNED, ACCEPTED, DECLINED, EN_ROUTE, ON_SITE, COMPLETED
+  Response_Notes
+  Response_AssignedAt
+  Response_AcceptedAt
+  Response_ArrivedAt
+  Response_CompletedAt
+
+ALERT
+-----
+  Alert_ID               PK
+  Alert_IncidentID       FK -> INCIDENT
+  Alert_RecipientID      FK -> USER
+  Alert_Type
+  Alert_Message
+  Alert_Status
+  Alert_SentAt
+  Alert_AcknowledgedAt
+
+STATUS_HISTORY
+--------------
+  History_ID             PK
+  History_EntityType     enum: INCIDENT, RESPONSE, ALERT, DETECTION, AGENCY
+  History_EntityID
+  History_FieldChanged
+  History_OldValue
+  History_NewValue
+  History_ChangedBy      FK -> USER or PLATFORM_ADMIN (nullable one or the other)
+  History_ChangedAt
+
+
+RELATIONSHIPS (with connecting verbs)
+========================================
+
+USER          ||--o{ AGENCY           : "registers"      (Agency_CreatedBy, agency_admin, self-service signup)
+PLATFORM_ADMIN||--o{ AGENCY           : "validates"      (Agency_ValidatedBy, approves + monitors subscription)
+AGENCY        ||--o{ USER             : "employs"
+AGENCY        ||--o{ INCIDENT         : "owns"           (Incident_AgencyID)
+USER          ||--o{ DRONE            : "adds"           (Drone_AddedBy, command_staff)
+DRONE         ||--o{ DETECTION        : "captures"       (Detection_DroneID)
+USER          ||--o{ DETECTION        : "reviews"        (Detection_ReviewedBy)
+DETECTION     ||--o{ MEDIA            : "attaches to"    (Media_DetectionID)
+INCIDENT      ||--o{ MEDIA            : "attaches to"    (Media_IncidentID)
+USER          ||--o{ MEDIA            : "uploads"        (Media_UploadedBy)
+DETECTION     |o--o| INCIDENT         : "escalates to"   (Incident_DetectionID)
+USER          ||--o{ INCIDENT         : "reports"        (Incident_ReportedBy)
+INCIDENT      ||--o{ RESPONSE         : "generates"      (Response_IncidentID)
+USER          ||--o{ RESPONSE         : "responds to"    (Response_UserID)
+INCIDENT      ||--o{ ALERT            : "triggers"       (Alert_IncidentID)
+USER          ||--o{ ALERT            : "receives"       (Alert_RecipientID)
+USER          ||--o{ STATUS_HISTORY   : "changes"        (History_ChangedBy, operational actions)
+PLATFORM_ADMIN||--o{ STATUS_HISTORY   : "changes"        (History_ChangedBy, agency validation/subscription actions)
+INCIDENT      ||--o{ STATUS_HISTORY   : "tracked by"     (History_EntityID, when EntityType = INCIDENT)
+RESPONSE      ||--o{ STATUS_HISTORY   : "tracked by"     (History_EntityID, when EntityType = RESPONSE)
+ALERT         ||--o{ STATUS_HISTORY   : "tracked by"     (History_EntityID, when EntityType = ALERT)
+DETECTION     ||--o{ STATUS_HISTORY   : "tracked by"     (History_EntityID, when EntityType = DETECTION)
+AGENCY        ||--o{ STATUS_HISTORY   : "tracked by"     (History_EntityID, when EntityType = AGENCY)
+
+
+RELATIONSHIP STRENGTH
+========================================
+Strong = mandatory/identifying; child row is meaningless without the
+         parent; FK should be NOT NULL.
+Weak   = optional/non-identifying; FK is nullable, child can exist (or
+         wait to be linked) independently of the parent.
+
+USER          -> AGENCY          registers      STRONG  (every agency must have a self-registering agency_admin)
+PLATFORM_ADMIN-> AGENCY          validates      WEAK    (Agency_ValidatedBy nullable until reviewed)
+AGENCY        -> USER            employs        STRONG  (every operational user must belong to an agency)
+AGENCY        -> INCIDENT        owns           STRONG  (every incident must be agency-scoped)
+USER          -> DRONE           adds           STRONG  (every drone must have been registered by a command_staff user)
+DRONE         -> DETECTION       captures       STRONG  (detection requires its source drone)
+USER          -> DETECTION       reviews        WEAK    (nullable until reviewed)
+DETECTION     -> MEDIA           attaches to    WEAK    (nullable; media may attach to incident instead)
+INCIDENT      -> MEDIA           attaches to    WEAK    (nullable; media may attach to detection instead)
+USER          -> MEDIA           uploads        STRONG  (every media row needs an uploader)
+DETECTION     -> INCIDENT        escalates to   WEAK    (nullable; incidents can be manually reported)
+USER          -> INCIDENT        reports        STRONG  (every incident needs a reporter)
+INCIDENT      -> RESPONSE        generates      STRONG  (response meaningless without its incident)
+USER          -> RESPONSE        responds to    STRONG  (response meaningless without its responder)
+INCIDENT      -> ALERT           triggers       STRONG  (alert meaningless without its incident)
+USER          -> ALERT           receives       STRONG  (every alert needs a recipient)
+USER/PLATFORM_ADMIN -> STATUS_HISTORY  changes  WEAK    (exactly one of the two should be set per row)
+*             -> STATUS_HISTORY  tracked by     WEAK    (polymorphic, not DB-enforced)
+
+Weak entities (existence-dependent on 2 parent FKs):
+  RESPONSE, ALERT
+
+Optionally-linked strong entities (own PK, but link is nullable/polymorphic):
+  MEDIA, STATUS_HISTORY
+
+Independent strong entities:
+  PLATFORM_ADMIN, AGENCY, USER, DRONE, DETECTION, INCIDENT
+
+
+NOTES
+========================================
+- PLATFORM_ADMIN is now a separate table from USER. It sits outside every
+  agency and every operational workflow — its only footprint in the whole
+  schema is Agency_ValidatedBy (and, by extension, STATUS_HISTORY rows for
+  AGENCY changes). It does not operate drones, report incidents, respond
+  to incidents, or receive alerts, so it no longer shares USER's mostly
+  agency-scoped columns/relationships.
+- User_Role's enum no longer includes system_admin — that role has moved
+  entirely to PLATFORM_ADMIN with its own identity/login.
+- STATUS_HISTORY.History_ChangedBy can point to either a USER (operational
+  action) or a PLATFORM_ADMIN (agency validation/subscription action) —
+  enforce "exactly one of the two" at the application layer, same pattern
+  as MEDIA's dual nullable FK.
+- STATUS_HISTORY is a polymorphic log: History_EntityID points to a row in
+  whichever table History_EntityType names (INCIDENT, RESPONSE, ALERT,
+  DETECTION, or AGENCY). It is not a single hard FK — enforce the link at
+  the application layer.
+- MEDIA can attach to either a DETECTION or an INCIDENT (not required to
+  have both); exactly one of Media_DetectionID / Media_IncidentID should
+  be set per row.
+- RESPONSE is the join table between INCIDENT and USER, and is what makes
+  multi-responder incidents possible (one incident, many RESPONSE rows).
+- Incident_AgencyID makes incidents visible/queryable per agency even
+  before any RESPONSE row exists.
+- Agency registration is self-service: an org signs up, which creates the
+  AGENCY row and its first agency_admin USER row together in one
+  transaction (Agency_CreatedBy <-> User_AgencyID are circular by design —
+  both rows must be written atomically since neither can reference a
+  not-yet-existing row otherwise).
+- Agency_RegistrationStatus starts PENDING on signup. The agency (and its
+  users) should be treated as unusable/locked until a PLATFORM_ADMIN sets
+  it to APPROVED via Agency_ValidatedBy/Agency_ValidatedAt.
+- After approval, PLATFORM_ADMIN's only ongoing responsibility is toggling
+  Agency_SubscriptionStatus (ACTIVE/EXPIRED/SUSPENDED) — it does not
+  create, edit, or manage agencies beyond validation and subscription
+  monitoring.

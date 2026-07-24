@@ -66,8 +66,11 @@ async function start() {
   if (!demoAgency) {
     demoAgency = store.createAgency({
       name:               'CDRRMO Cebu Demo',
+      registrationStatus: 'APPROVED',
       subscriptionStatus: 'ACTIVE',
       createdBy:          'bootstrap',
+      validatedBy:        'bootstrap',
+      validatedAt:        new Date().toISOString(),
     });
   }
 

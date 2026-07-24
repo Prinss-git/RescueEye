@@ -1,81 +1,93 @@
 'use strict';
+const path = require('path');
 const { Router } = require('express');
 const store = require('../lib/store');
-const { hashPassword, requireAuth, requireRole } = require('../lib/authz');
+const { requireAuth, requireRole } = require('../lib/authz');
 
 const router = Router();
+
+const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads', 'agencies');
 
 router.use(requireAuth, requireRole('system_admin'));
 
 function toSafeUser(user) {
+  if (!user) return null;
   const { passwordHash, ...safe } = user;
   return safe;
 }
 
-// GET /admin/agencies — list every agency with its admin and user count
-router.get('/agencies', (_req, res) => {
-  const agencies = store.getAgencies().map((agency) => {
-    const agencyUsers = store.getUsers({ agencyId: agency.id });
-    const admin = agencyUsers.find((u) => u.role === 'agency_admin');
-    return {
-      ...agency,
-      admin: admin ? toSafeUser(admin) : null,
-      userCount: agencyUsers.length,
-    };
-  });
+function withAdminAndCount(agency) {
+  const agencyUsers = store.getUsers({ agencyId: agency.id });
+  const admin = agencyUsers.find((u) => u.role === 'agency_admin');
+  return {
+    ...agency,
+    admin: toSafeUser(admin),
+    userCount: agencyUsers.length,
+  };
+}
+
+// GET /admin/agencies?status=PENDING|APPROVED|REJECTED — registration queue
+// and subscription roster. System Admin's job is limited to reviewing
+// registrations and monitoring subscription status — nothing else about an
+// agency's internals (renaming, credentials, operational data) lives here.
+router.get('/agencies', (req, res) => {
+  const { status } = req.query;
+  const agencies = store.getAgencies({ registrationStatus: status }).map(withAdminAndCount);
   res.json(agencies);
 });
 
-// POST /admin/agencies — create an agency and its first Agency Admin together
-router.post('/agencies', async (req, res) => {
-  const { agencyName, subscriptionStatus, adminName, adminEmail, adminPassword } = req.body;
+// GET /admin/agencies/:id/documents/:storedName — download a submitted
+// verification document. storedName must match an entry already recorded
+// on this agency (set only by the upload step itself), so an attacker
+// can't use this to read arbitrary files off disk.
+router.get('/agencies/:id/documents/:storedName', (req, res) => {
+  const agency = store.getAgencyById(req.params.id);
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
 
-  if (!agencyName || !adminName || !adminEmail || !adminPassword) {
-    return res.status(400).json({
-      error: 'agencyName, adminName, adminEmail, and adminPassword are required',
-    });
-  }
-  if (store.getUserByEmail(adminEmail)) {
-    return res.status(409).json({ error: 'A user with this email already exists' });
-  }
+  const doc = (agency.verificationDocuments || []).find((d) => d.storedName === req.params.storedName);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
 
-  const agency = store.createAgency({
-    name:               agencyName,
-    subscriptionStatus: subscriptionStatus || 'ACTIVE',
-    createdBy:           req.user.uid,
-  });
-
-  const passwordHash = await hashPassword(adminPassword);
-  const admin = store.createUser({
-    email:        adminEmail,
-    displayName:  adminName,
-    role:         'agency_admin',
-    organization: agencyName,
-    agencyId:     agency.id,
-    passwordHash,
-  });
-
-  res.status(201).json({ agency, admin: toSafeUser(admin) });
+  res.download(path.join(UPLOAD_ROOT, agency.id, doc.storedName), doc.fileName);
 });
 
-// PATCH /admin/agencies/:id/status — toggle an agency's subscription status
+// PATCH /admin/agencies/:id/approve — clears a pending registration
+router.patch('/agencies/:id/approve', (req, res) => {
+  const agency = store.getAgencyById(req.params.id);
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
+  if (agency.registrationStatus !== 'PENDING') {
+    return res.status(400).json({ error: 'Only pending agencies can be approved' });
+  }
+
+  const updated = store.approveAgency(req.params.id, req.user.uid);
+  res.json(withAdminAndCount(updated));
+});
+
+// PATCH /admin/agencies/:id/reject — body: { reason }
+router.patch('/agencies/:id/reject', (req, res) => {
+  const { reason } = req.body;
+  const agency = store.getAgencyById(req.params.id);
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
+  if (agency.registrationStatus !== 'PENDING') {
+    return res.status(400).json({ error: 'Only pending agencies can be rejected' });
+  }
+
+  const updated = store.rejectAgency(req.params.id, req.user.uid, reason);
+  res.json(withAdminAndCount(updated));
+});
+
+// PATCH /admin/agencies/:id/status — toggle an approved agency's subscription
 router.patch('/agencies/:id/status', (req, res) => {
   const { status } = req.body;
   if (!status) return res.status(400).json({ error: 'status is required' });
 
-  const agency = store.setAgencySubscriptionStatus(req.params.id, status);
+  const agency = store.getAgencyById(req.params.id);
   if (!agency) return res.status(404).json({ error: 'Agency not found' });
-  res.json(agency);
-});
+  if (agency.registrationStatus !== 'APPROVED') {
+    return res.status(400).json({ error: 'Only approved agencies have a subscription to monitor' });
+  }
 
-// PATCH /admin/agencies/:id — rename an agency
-router.patch('/agencies/:id', (req, res) => {
-  const { name } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
-
-  const agency = store.renameAgency(req.params.id, name.trim());
-  if (!agency) return res.status(404).json({ error: 'Agency not found' });
-  res.json(agency);
+  const updated = store.setAgencySubscriptionStatus(req.params.id, status, req.user.uid);
+  res.json(withAdminAndCount(updated));
 });
 
 // DELETE /admin/agencies/:id — cascade-deletes the agency, its users, and its teams
@@ -92,27 +104,14 @@ router.delete('/agencies/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// PATCH /admin/agencies/:id/admin-password — reset the agency's admin's password
-router.patch('/agencies/:id/admin-password', async (req, res) => {
-  const { password } = req.body;
-  if (!password) return res.status(400).json({ error: 'password is required' });
-
-  const agencyUsers = store.getUsers({ agencyId: req.params.id });
-  const admin = agencyUsers.find((u) => u.role === 'agency_admin');
-  if (!admin) return res.status(404).json({ error: 'No agency admin found for this agency' });
-
-  const passwordHash = await hashPassword(password);
-  store.setUserPassword(admin.uid, passwordHash);
-  res.json({ success: true });
-});
-
-// GET /admin/missions — every mission system-wide, with owning agency name attached
-router.get('/missions', (_req, res) => {
-  const missions = store.getMissionsEnriched().map((m) => {
-    const agency = m.agencyId ? store.getAgencyById(m.agencyId) : null;
-    return { ...m, agencyName: agency ? agency.name : null };
+// GET /admin/actions — accountability feed of this System Admin's own
+// approve/reject/suspend actions
+router.get('/actions', (_req, res) => {
+  const actions = store.getAdminActions().map((a) => {
+    const agency = a.agencyId ? store.getAgencyById(a.agencyId) : null;
+    return { ...a, agencyName: agency ? agency.name : null };
   });
-  res.json(missions);
+  res.json(actions);
 });
 
 module.exports = router;

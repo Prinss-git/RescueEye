@@ -174,35 +174,3 @@ describe('GET /agency/missions — mission history', () => {
   });
 });
 
-describe('GET /admin/missions — system-wide mission overview', () => {
-  test('returns missions across all agencies with agency name attached', async () => {
-    const { token: sysToken } = await createTestUser('system_admin');
-
-    const agencyRes = await request(app)
-      .post('/admin/agencies')
-      .set('Authorization', `Bearer ${sysToken}`)
-      .send({
-        agencyName:    `Overview Agency ${Date.now()}`,
-        adminName:     'Overview Admin',
-        adminEmail:    `overview-admin-${Date.now()}@test.ph`,
-        adminPassword: 'pass123456',
-      });
-    const { agency, admin } = agencyRes.body;
-    const agencyLogin = await request(app).post('/auth/login').send({ email: admin.email, password: 'pass123456' });
-    const agencyToken = agencyLogin.body.token;
-    const { user: commander } = await createTestUser('command_staff', { agencyId: agency.id });
-
-    const teamRes = await request(app)
-      .post('/agency/teams')
-      .set('Authorization', `Bearer ${agencyToken}`)
-      .send({ name: 'Overview Team' });
-    const incident = await createIncident();
-    await request(app).patch(`/teams/${teamRes.body.id}/assign`).send({ incidentId: incident.id, assignedBy: commander.uid });
-
-    const res = await request(app).get('/admin/missions').set('Authorization', `Bearer ${sysToken}`);
-    expect(res.status).toBe(200);
-    const found = res.body.find(m => m.agencyId === agency.id);
-    expect(found).toBeTruthy();
-    expect(found.agencyName).toBe(agency.name);
-  });
-});

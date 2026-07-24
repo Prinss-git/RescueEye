@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { LoaderCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getHomeRoute } from '../components/ProtectedRoute'
@@ -94,6 +94,9 @@ export default function Login() {
         </form>
 
         <p className="text-center text-slate-400 text-xs mt-6">
+          Registering a new agency? <Link to="/register" className="text-accent hover:underline">Sign up here</Link>
+        </p>
+        <p className="text-center text-slate-400 text-xs mt-2">
           University of Cebu – Banilad Campus · Capstone 2025
         </p>
       </div>

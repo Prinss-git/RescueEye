@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import PageTransition from './components/PageTransition'
 import Landing from './screens/Landing'
 import Login from './screens/Login'
+import Register from './screens/Register'
 import Dashboard from './screens/Dashboard'
 import DamageMap from './screens/DamageMap'
 import CoordinationPanel from './screens/CoordinationPanel'
@@ -25,8 +26,9 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait" initial={false}>
       <Routes location={location} key={location.pathname}>
-        <Route path="/"      element={<PageTransition><Landing /></PageTransition>} />
-        <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
+        <Route path="/"         element={<PageTransition><Landing /></PageTransition>} />
+        <Route path="/login"    element={<PageTransition><Login /></PageTransition>} />
+        <Route path="/register" element={<PageTransition><Register /></PageTransition>} />
 
         <Route element={<ProtectedRoute allowedRoles={OPERATIONAL_ROLES} />}>
           <Route path="/dashboard"    element={<PageTransition><Dashboard /></PageTransition>} />

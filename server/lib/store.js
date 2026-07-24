@@ -236,8 +236,10 @@ function addMessage(data) {
 
 // ── Agencies ──────────────────────────────────────────────────────────────────
 
-function getAgencies() {
-  return agencies;
+function getAgencies(filter = {}) {
+  let list = [...agencies];
+  if (filter.registrationStatus) list = list.filter(a => a.registrationStatus === filter.registrationStatus);
+  return list;
 }
 
 function getAgencyById(id) {
@@ -246,23 +248,87 @@ function getAgencyById(id) {
 
 function createAgency(data) {
   const agency = {
-    id:                 `AGCY-${Date.now()}`,
-    name:                data.name,
-    subscriptionStatus:  data.subscriptionStatus || 'ACTIVE',
-    createdBy:           data.createdBy,
-    createdAt:           new Date().toISOString(),
+    id:                   `AGCY-${Date.now()}`,
+    name:                  data.name,
+    registrationStatus:    data.registrationStatus || 'PENDING',
+    subscriptionStatus:    data.subscriptionStatus || 'ACTIVE',
+    createdBy:             data.createdBy,
+    createdAt:             new Date().toISOString(),
+    validatedBy:           data.validatedBy || null,
+    validatedAt:           data.validatedAt || null,
+    rejectionReason:       null,
+    verificationDocuments: [],
   };
   agencies.push(agency);
   _syncAgency(agency);
   return agency;
 }
 
-function setAgencySubscriptionStatus(id, status) {
+// Attaches uploaded verification documents (e.g. accreditation certificate,
+// government ID) submitted at registration time, so a System Admin has
+// something to actually check before approving — a name/email/password
+// alone proves nothing about whether the org is real.
+function addAgencyDocuments(id, docs) {
+  const agency = agencies.find(a => a.id === id);
+  if (!agency) return null;
+  if (!agency.verificationDocuments) agency.verificationDocuments = [];
+  agency.verificationDocuments.push(...docs);
+  _syncAgency(agency);
+  return agency;
+}
+
+// Self-service agency registration: creates the AGENCY row and its first
+// agency_admin USER row together. The two rows are circular by design
+// (Agency.createdBy -> User.uid, User.agencyId -> Agency.id), so the
+// agency is created first and then patched with createdBy once the admin
+// user exists. Starts locked at registrationStatus PENDING — the agency
+// (and its users) are unusable until a System Admin approves it.
+function registerAgency({ agencyName, adminName, adminEmail, passwordHash }) {
+  const agency = createAgency({ name: agencyName, registrationStatus: 'PENDING', createdBy: null });
+  const admin = createUser({
+    email:        adminEmail,
+    displayName:  adminName,
+    role:         'agency_admin',
+    organization: agencyName,
+    agencyId:     agency.id,
+    passwordHash,
+  });
+  agency.createdBy = admin.uid;
+  _syncAgency(agency);
+  return { agency, admin };
+}
+
+function approveAgency(id, validatedBy) {
+  const agency = agencies.find(a => a.id === id);
+  if (!agency) return null;
+  agency.registrationStatus = 'APPROVED';
+  agency.validatedBy = validatedBy;
+  agency.validatedAt = new Date().toISOString();
+  agency.rejectionReason = null;
+  _syncAgency(agency);
+  recordAdminAction({ type: 'AGENCY_APPROVED', agencyId: id, adminId: validatedBy });
+  return agency;
+}
+
+function rejectAgency(id, validatedBy, reason) {
+  const agency = agencies.find(a => a.id === id);
+  if (!agency) return null;
+  agency.registrationStatus = 'REJECTED';
+  agency.validatedBy = validatedBy;
+  agency.validatedAt = new Date().toISOString();
+  agency.rejectionReason = reason || null;
+  _syncAgency(agency);
+  recordAdminAction({ type: 'AGENCY_REJECTED', agencyId: id, adminId: validatedBy, detail: reason || null });
+  return agency;
+}
+
+function setAgencySubscriptionStatus(id, status, changedBy) {
   const agency = agencies.find(a => a.id === id);
   if (!agency) return null;
   agency.subscriptionStatus = status;
   agency.updatedAt = new Date().toISOString();
   _syncAgency(agency);
+  recordAdminAction({ type: `AGENCY_${status}`, agencyId: id, adminId: changedBy || null });
   return agency;
 }
 
@@ -273,6 +339,28 @@ function renameAgency(id, name) {
   agency.updatedAt = new Date().toISOString();
   _syncAgency(agency);
   return agency;
+}
+
+// ── Admin action log ─────────────────────────────────────────────────────────
+// Lightweight audit trail for System Admin actions (approve/reject/suspend).
+// In-memory only, not synced to Firestore — good enough for an accountability
+// feed without building out a full polymorphic history table.
+
+const adminActions = [];
+
+function recordAdminAction({ type, agencyId, adminId, detail }) {
+  adminActions.push({
+    id:        `ACT-${Date.now()}`,
+    type,
+    agencyId:  agencyId || null,
+    adminId:   adminId || null,
+    detail:    detail || null,
+    at:        new Date().toISOString(),
+  });
+}
+
+function getAdminActions() {
+  return [...adminActions].sort((a, b) => new Date(b.at) - new Date(a.at));
 }
 
 // Removes the agency plus all its users and teams. Every agency has at
@@ -620,6 +708,24 @@ async function hydrate() {
     agencies.length = 0;
     agenciesSnap.forEach((doc) => agencies.push(doc.data()));
 
+    // Backfill agencies written before the registration-review workflow
+    // existed. They were already live and usable, so treat them as
+    // pre-approved rather than dropping them into an invisible limbo state
+    // that matches none of the System Admin dashboard's tabs.
+    const legacyAgencies = agencies.filter((a) => !a.registrationStatus);
+    if (legacyAgencies.length > 0) {
+      const now = new Date().toISOString();
+      await Promise.all(legacyAgencies.map((a) => {
+        a.registrationStatus = 'APPROVED';
+        a.validatedBy = a.validatedBy || 'legacy-migration';
+        a.validatedAt = a.validatedAt || now;
+        a.rejectionReason = a.rejectionReason ?? null;
+        a.verificationDocuments = a.verificationDocuments || [];
+        return _syncAgency(a);
+      }));
+      console.log(`[store] Backfilled registrationStatus=APPROVED on ${legacyAgencies.length} legacy agency record(s)`);
+    }
+
     users.length = 0;
     usersSnap.forEach((doc) => users.push(doc.data()));
 
@@ -662,9 +768,15 @@ module.exports = {
   getAgencies,
   getAgencyById,
   createAgency,
+  registerAgency,
+  approveAgency,
+  rejectAgency,
   setAgencySubscriptionStatus,
   renameAgency,
+  addAgencyDocuments,
   deleteAgencyCascade,
+  recordAdminAction,
+  getAdminActions,
   getUsers,
   getUserByEmail,
   getUserById,

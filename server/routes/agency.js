@@ -16,6 +16,23 @@ function toSafeUser(user) {
   return safe;
 }
 
+// GET /agency/profile — the caller's own agency (name, registration/subscription status)
+router.get('/profile', (req, res) => {
+  const agency = store.getAgencyById(req.user.agencyId);
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
+  res.json(agency);
+});
+
+// PATCH /agency/profile — rename the caller's own agency
+router.patch('/profile', (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+
+  const agency = store.renameAgency(req.user.agencyId, name.trim());
+  if (!agency) return res.status(404).json({ error: 'Agency not found' });
+  res.json(agency);
+});
+
 // GET /agency/users — list users belonging to the caller's own agency
 router.get('/users', (req, res) => {
   const users = store.getUsers({ agencyId: req.user.agencyId }).map(toSafeUser);

@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react'
 import { useAuth } from '../context/AuthContext'
 
+interface AgencyProfile {
+  id: string
+  name: string
+  registrationStatus: 'PENDING' | 'APPROVED' | 'REJECTED'
+  subscriptionStatus: 'ACTIVE' | 'SUSPENDED' | string
+}
+
 interface AgencyUser {
   uid: string
   email: string
@@ -28,6 +35,59 @@ interface MissionRow {
   status: string
   createdAt: string
   completedAt: string | null
+}
+
+const SUB_STATUS_STYLE: Record<string, string> = {
+  ACTIVE:    'text-green-700 border-green-200 bg-green-50',
+  SUSPENDED: 'text-alert border-red-200 bg-red-50',
+}
+
+function AgencyProfilePanel({ agency, onRename }: {
+  agency: AgencyProfile
+  onRename: (name: string) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName]       = useState(agency.name)
+  const [busy, setBusy]       = useState(false)
+
+  async function save() {
+    if (!name.trim() || name.trim() === agency.name) { setEditing(false); return }
+    setBusy(true)
+    try { await onRename(name.trim()) } finally { setBusy(false); setEditing(false) }
+  }
+
+  return (
+    <div className="panel p-4 flex items-center justify-between gap-4">
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <input className="input-field text-sm py-1" value={name}
+              onChange={(e) => setName(e.target.value)} disabled={busy} autoFocus />
+            <button onClick={save} className="btn-primary text-xs flex-shrink-0" disabled={busy}>Save</button>
+            <button onClick={() => { setEditing(false); setName(agency.name) }} className="btn-ghost text-xs flex-shrink-0" disabled={busy}>Cancel</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-base font-semibold text-slate-800 truncate cursor-pointer hover:underline"
+              onClick={() => setEditing(true)} title="Click to rename">
+              {agency.name}
+            </span>
+            <span className={`badge ${SUB_STATUS_STYLE[agency.subscriptionStatus] ?? ''}`}>
+              {agency.subscriptionStatus}
+            </span>
+            {agency.registrationStatus !== 'APPROVED' && (
+              <span className="badge border-slate-200 text-slate-500">{agency.registrationStatus}</span>
+            )}
+          </div>
+        )}
+        {agency.subscriptionStatus !== 'ACTIVE' && (
+          <p className="text-xs text-alert mt-1">
+            Your subscription is {agency.subscriptionStatus.toLowerCase()}. Contact RescueEye support to restore access.
+          </p>
+        )}
+      </div>
+    </div>
+  )
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -290,6 +350,7 @@ function MissionHistoryPanel({ missions }: { missions: MissionRow[] }) {
 
 export default function AgencyAdminDashboard() {
   const { token } = useAuth()
+  const [agency, setAgency]     = useState<AgencyProfile | null>(null)
   const [users, setUsers]       = useState<AgencyUser[]>([])
   const [teams, setTeams]       = useState<Team[]>([])
   const [missions, setMissions] = useState<MissionRow[]>([])
@@ -307,6 +368,11 @@ export default function AgencyAdminDashboard() {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }), [token])
+
+  const fetchAgency = useCallback(async () => {
+    const res = await fetch('/server/agency/profile', { headers: authHeaders() })
+    if (res.ok) setAgency(await res.json())
+  }, [authHeaders])
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -327,7 +393,16 @@ export default function AgencyAdminDashboard() {
     if (res.ok) setMissions(await res.json())
   }, [authHeaders])
 
-  useEffect(() => { fetchUsers(); fetchTeams(); fetchMissions() }, [fetchUsers, fetchTeams, fetchMissions])
+  useEffect(() => { fetchAgency(); fetchUsers(); fetchTeams(); fetchMissions() }, [fetchAgency, fetchUsers, fetchTeams, fetchMissions])
+
+  async function renameAgency(newName: string) {
+    await fetch('/server/agency/profile', {
+      method:  'PATCH',
+      headers: authHeaders(),
+      body:    JSON.stringify({ name: newName }),
+    })
+    fetchAgency()
+  }
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
@@ -429,6 +504,8 @@ export default function AgencyAdminDashboard() {
           {showForm ? 'Cancel' : '+ Add User'}
         </button>
       </div>
+
+      {agency && <AgencyProfilePanel agency={agency} onRename={renameAgency} />}
 
       {showForm && (
         <form onSubmit={handleCreate} className="panel p-5 space-y-4">
