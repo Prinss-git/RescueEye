@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
+import * as Location from 'expo-location'
 import { useNavigation } from '@react-navigation/native'
 import { SERVER_BASE } from '../config'
 import { useAuth } from '../context/AuthContext'
 import { colors, font, radius, spacing } from '../theme'
+
+const LOCATION_REPORT_MS = 30_000
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -68,8 +71,29 @@ async function requestNotifPermission() {
   return status === 'granted'
 }
 
+// Lets verified incidents be auto-dispatched to whichever responder is
+// physically closest — reports this device's current position to the
+// server every LOCATION_REPORT_MS while a field responder is logged in.
+async function reportLocation(token: string | null) {
+  if (!token) return
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync()
+    if (status !== 'granted') return
+    const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+    await fetch(`${SERVER_BASE}/me/location`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body:    JSON.stringify({ lat: position.coords.latitude, lng: position.coords.longitude }),
+      signal:  AbortSignal.timeout(5000),
+    })
+  } catch {
+    // best-effort — a missed location ping just means this responder
+    // won't be considered for the next dispatch until the next tick
+  }
+}
+
 export default function MissionsScreen() {
-  const { user } = useAuth()
+  const { user, token } = useAuth()
   const navigation = useNavigation<any>()
   const [missions, setMissions]   = useState<Mission[]>([])
   const [incidents, setIncidents] = useState<Record<string, Incident>>({})
@@ -77,6 +101,23 @@ export default function MissionsScreen() {
   const seenIds = useRef<Set<string>>(new Set())
 
   useEffect(() => { requestNotifPermission() }, [])
+
+  // Tapping the OS notification banner jumps straight to the relevant
+  // mission's detail screen instead of just opening the app to this list.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const missionId = response.notification.request.content.data?.missionId
+      if (missionId) navigation.navigate('MissionDetail', { missionId })
+    })
+    return () => sub.remove()
+  }, [navigation])
+
+  useEffect(() => {
+    if (!user || user.role !== 'field_responder' || !token) return
+    reportLocation(token)
+    const t = setInterval(() => reportLocation(token), LOCATION_REPORT_MS)
+    return () => clearInterval(t)
+  }, [user, token])
 
   useEffect(() => {
     if (!user) return
@@ -99,6 +140,9 @@ export default function MissionsScreen() {
               content: {
                 title: '🚨 New Mission Assigned',
                 body:  `${newOnes.length} new mission${newOnes.length > 1 ? 's' : ''} dispatched to your team`,
+                // Only a single new mission maps cleanly to a tap target —
+                // with several at once, tapping just opens this list instead.
+                data:  newOnes.length === 1 ? { missionId: newOnes[0].id } : undefined,
               },
               trigger: null,
             })

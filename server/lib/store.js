@@ -161,6 +161,7 @@ function getIncidents(filter = {}) {
   let list = [...incidents];
   if (filter.status) list = list.filter(i => i.status === filter.status);
   if (filter.type)   list = list.filter(i => i.type === filter.type);
+  if (filter.verified !== undefined) list = list.filter(i => i.verified === filter.verified);
   return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
@@ -183,10 +184,88 @@ function createIncident(data) {
     drillSessionId: data.drillSessionId || null,
     createdAt:     new Date().toISOString(),
     resolvedAt:    null,
+    verified:      false,
+    verifiedBy:    null,
+    verifiedAt:    null,
   };
   incidents.push(incident);
   _syncIncident(incident);
   return incident;
+}
+
+// Marks an incident as human-confirmed and immediately dispatches it to the
+// nearest active field responder in the verifying Command Staff's own
+// agency (by straight-line distance to their last reported location) — no
+// team involved, matching the individual-responder assignment model.
+function verifyIncident(id, verifiedBy, agencyId) {
+  const incident = incidents.find(i => i.id === id);
+  if (!incident) return null;
+
+  incident.verified = true;
+  incident.verifiedBy = verifiedBy;
+  incident.verifiedAt = new Date().toISOString();
+  _syncIncident(incident);
+
+  const nearest = findNearestFieldResponder(agencyId, incident.lat, incident.lng);
+  let mission = null;
+  if (nearest) {
+    incident.status = 'ASSIGNED';
+    _syncIncident(incident);
+    mission = createMission({
+      incidentId: id,
+      teamId: null,
+      agencyId,
+      assignedBy: verifiedBy,
+      responderUserIds: [nearest.uid],
+    });
+  }
+
+  return {
+    incident,
+    mission,
+    dispatchedTo: nearest
+      ? { uid: nearest.uid, displayName: nearest.displayName, distanceKm: Math.round(nearest.distanceKm * 10) / 10 }
+      : null,
+  };
+}
+
+// ── Geolocation ───────────────────────────────────────────────────────────────
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findNearestFieldResponder(agencyId, lat, lng) {
+  const candidates = users.filter(u =>
+    u.role === 'field_responder' &&
+    u.agencyId === agencyId &&
+    u.active &&
+    u.lastLat != null && u.lastLng != null
+  );
+  if (candidates.length === 0) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+  for (const u of candidates) {
+    const d = haversineKm(lat, lng, u.lastLat, u.lastLng);
+    if (d < bestDist) { bestDist = d; best = u; }
+  }
+  return { ...best, distanceKm: bestDist };
+}
+
+function updateUserLocation(uid, lat, lng) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  user.lastLat = lat;
+  user.lastLng = lng;
+  user.locationUpdatedAt = new Date().toISOString();
+  _syncUser(user);
+  return user;
 }
 
 function resolveIncident(incidentId) {
@@ -415,6 +494,9 @@ function createUser(data) {
     active:       true,
     createdAt:    new Date().toISOString(),
     lastLogin:    null,
+    lastLat:            null,
+    lastLng:            null,
+    locationUpdatedAt:  null,
   };
   users.push(user);
   _syncUser(user);
@@ -474,7 +556,8 @@ function createMission(data) {
   const mission = {
     id:               `MISS-${Date.now()}`,
     incidentId:       data.incidentId,
-    teamId:           data.teamId,
+    teamId:           data.teamId || null,
+    agencyId:         data.agencyId || null,
     assignedBy:       data.assignedBy || null,
     responderUserIds: data.responderUserIds || [],
     status:           'ASSIGNED',
@@ -489,8 +572,10 @@ function createMission(data) {
   return mission;
 }
 
-// Joins missions with their team/incident context. Missions don't carry
-// agencyId directly — it's derived via teamId → team.agencyId.
+// Joins missions with their team/incident context. Older missions (created
+// via team dispatch) don't carry agencyId directly — it's derived via
+// teamId → team.agencyId. Missions created via nearest-responder
+// auto-dispatch (no team) carry agencyId explicitly instead.
 function getMissionsEnriched(filter = {}) {
   let list = missions.map((m) => {
     const team = teams.find(t => t.id === m.teamId);
@@ -498,7 +583,7 @@ function getMissionsEnriched(filter = {}) {
     return {
       ...m,
       teamName:         team ? team.name : null,
-      agencyId:         team ? team.agencyId : null,
+      agencyId:         m.agencyId || (team ? team.agencyId : null),
       incidentType:     incident ? incident.type : null,
       incidentSeverity: incident ? incident.severity : null,
     };
@@ -763,6 +848,8 @@ module.exports = {
   getIncidentById,
   createIncident,
   resolveIncident,
+  verifyIncident,
+  findNearestFieldResponder,
   getMessages,
   addMessage,
   getAgencies,
@@ -785,6 +872,7 @@ module.exports = {
   setUserActive,
   setUserPassword,
   updateUser,
+  updateUserLocation,
   getMissions,
   getMissionsEnriched,
   getMissionById,

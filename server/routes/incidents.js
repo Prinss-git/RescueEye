@@ -1,18 +1,20 @@
 'use strict';
 const { Router } = require('express');
 const store = require('../lib/store');
+const { requireAuth, requireRole } = require('../lib/authz');
 
 const router = Router();
 
 const VALID_TYPES     = ['VICTIM_DETECTED', 'FLOOD', 'FIRE', 'STRUCTURAL', 'UNKNOWN'];
 const VALID_SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 
-// GET /incidents?status=OPEN&type=FLOOD
+// GET /incidents?status=OPEN&type=FLOOD&verified=true
 router.get('/', (req, res) => {
-  const { status, type } = req.query;
+  const { status, type, verified } = req.query;
   const filter = {};
   if (status) filter.status = status;
   if (type)   filter.type   = type;
+  if (verified !== undefined) filter.verified = verified === 'true';
   res.json(store.getIncidents(filter));
 });
 
@@ -52,6 +54,18 @@ router.patch('/:id/resolve', (req, res) => {
   const incident = store.resolveIncident(req.params.id);
   if (!incident) return res.status(404).json({ error: 'Incident not found' });
   res.json(incident);
+});
+
+// PATCH /incidents/:id/verify — Command Staff confirms a detected casualty
+// is real. Immediately dispatches the nearest active field responder in
+// the verifying Command Staff's own agency, by last reported location.
+router.patch('/:id/verify', requireAuth, requireRole('command_staff'), (req, res) => {
+  const incident = store.getIncidentById(req.params.id);
+  if (!incident) return res.status(404).json({ error: 'Incident not found' });
+  if (incident.verified) return res.status(400).json({ error: 'Incident already verified' });
+
+  const result = store.verifyIncident(req.params.id, req.user.uid, req.user.agencyId);
+  res.json(result);
 });
 
 module.exports = router;

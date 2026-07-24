@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { MapContainer, TileLayer, Popup, CircleMarker, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
@@ -24,14 +24,13 @@ interface Incident {
   source:     'static' | 'live'
 }
 
-interface LiveDetection {
-  id:         string
-  class:      string
-  confidence: number
-  bbox:       { x: number; y: number; w: number; h: number }
-  timestamp:  string
-  lat:        number
-  lng:        number
+interface VerifiedIncident {
+  id:          string
+  type:        'VICTIM_DETECTED' | 'FLOOD' | 'FIRE' | 'STRUCTURAL' | 'UNKNOWN'
+  description: string
+  lat:         number
+  lng:         number
+  createdAt:   string
 }
 
 const STATIC_INCIDENTS: Incident[] = [
@@ -59,10 +58,10 @@ const TYPE_LABEL: Record<DamageType, string> = {
 
 const LEGEND_TYPES = ['victim_detected', 'flood_damage', 'fire_damage', 'structural_damage'] as Exclude<DamageType, 'all'>[]
 
-function classToType(cls: string): Exclude<DamageType, 'all'> {
-  if (cls === 'person')            return 'victim_detected'
-  if (cls === 'flood_damage')      return 'flood_damage'
-  if (cls === 'fire_damage')       return 'fire_damage'
+function incidentTypeToDamageType(type: VerifiedIncident['type']): Exclude<DamageType, 'all'> {
+  if (type === 'VICTIM_DETECTED') return 'victim_detected'
+  if (type === 'FLOOD')           return 'flood_damage'
+  if (type === 'FIRE')            return 'fire_damage'
   return 'structural_damage'
 }
 
@@ -111,35 +110,33 @@ export default function DamageMap() {
   const [liveIncidents, setLive]    = useState<Incident[]>([])
   const [lastPoll, setLastPoll]     = useState<string>('—')
   const [pollError, setPollError]   = useState(false)
-  const seenIds                     = useRef<Set<string>>(new Set())
 
   useEffect(() => { injectPulseStyle() }, [])
 
+  // Only Command Staff-verified incidents ever reach the map — an
+  // unconfirmed AI detection isn't something field responders should be
+  // routed toward. Verification also assigns lat/lng straight from the
+  // Incident record, so this is a full snapshot each poll rather than an
+  // incremental "new detections" feed.
   useEffect(() => {
     async function poll() {
       try {
-        const res = await fetch('/api/detections/recent?limit=20')
+        const res = await fetch('/server/incidents?verified=true')
         if (!res.ok) throw new Error('non-ok')
-        const data: { detections: LiveDetection[] } = await res.json()
+        const data: VerifiedIncident[] = await res.json()
         setPollError(false)
         setLastPoll(new Date().toLocaleTimeString('en-PH', { hour12: false }))
 
-        const newItems: Incident[] = []
-        for (const d of data.detections) {
-          if (seenIds.current.has(d.id)) continue
-          seenIds.current.add(d.id)
-          newItems.push({
-            id:         `LIVE-${d.id.slice(0, 8)}`,
-            lat:        d.lat,
-            lng:        d.lng,
-            type:       classToType(d.class),
-            label:      `${d.class} detected (live) — conf ${Math.round(d.confidence * 100)}%`,
-            timestamp:  new Date(d.timestamp).toLocaleTimeString('en-PH', { hour12: false }),
-            confidence: d.confidence,
-            source:     'live',
-          })
-        }
-        if (newItems.length > 0) setLive((prev) => [...prev, ...newItems].slice(-100))
+        setLive(data.map((inc) => ({
+          id:         inc.id,
+          lat:        inc.lat,
+          lng:        inc.lng,
+          type:       incidentTypeToDamageType(inc.type),
+          label:      inc.description || `${inc.type.replace('_', ' ')} — verified`,
+          timestamp:  new Date(inc.createdAt).toLocaleTimeString('en-PH', { hour12: false }),
+          confidence: 1,
+          source:     'live',
+        })))
       } catch {
         setPollError(true)
       }

@@ -31,6 +31,12 @@
           "color": "#00d4ff"
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RescueEye needs your location so verified incidents can be dispatched to the nearest available field responder."
+        }
+      ],
       "expo-asset",
       "expo-font"
     ]

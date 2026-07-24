@@ -18,6 +18,7 @@ const evalRoutes     = require('./routes/evaluation');
 const adminRoutes    = require('./routes/admin');
 const agencyRoutes   = require('./routes/agency');
 const missionsRoutes = require('./routes/missions');
+const meRoutes       = require('./routes/me');
 
 const app = express();
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',');
@@ -49,6 +50,7 @@ app.use('/evaluation', evalRoutes);
 app.use('/admin',      adminRoutes);
 app.use('/agency',     agencyRoutes);
 app.use('/missions',   missionsRoutes);
+app.use('/me',          meRoutes);
 
 // Global error handler
 app.use((err, _req, res, _next) => {

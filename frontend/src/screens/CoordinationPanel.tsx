@@ -22,6 +22,7 @@ interface Incident {
   assignedTeam: string | null
   isDrill:      boolean
   createdAt:    string
+  verified:     boolean
 }
 
 interface Team {
@@ -92,7 +93,7 @@ function fmtTime(iso: string) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function CoordinationPanel() {
-  const { user } = useAuth()
+  const { user, token } = useAuth()
 
   const [incidents, setIncidents]           = useState<Incident[]>([])
   const [teams, setTeams]                   = useState<Team[]>([])
@@ -204,6 +205,28 @@ export default function CoordinationPanel() {
     } catch {}
   }
 
+  // ── Verify incident (command_staff) — auto-dispatches the nearest responder ─
+  async function verifyIncident(incidentId: string) {
+    try {
+      const res = await fetch(`/server/incidents/${incidentId}/verify`, {
+        method:  'PATCH',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Failed to verify incident')
+        return
+      }
+      const data = await res.json()
+      if (data.dispatchedTo) {
+        alert(`Verified. Dispatched to ${data.dispatchedTo.displayName} — ${data.dispatchedTo.distanceKm} km away.`)
+      } else {
+        alert('Verified. No field responder with a known location is currently available to dispatch.')
+      }
+      fetchIncidents()
+    } catch {}
+  }
+
   // ── Assign team ─────────────────────────────────────────────────────────────
   async function assignTeam(teamId: string, incidentId: string) {
     try {
@@ -283,18 +306,35 @@ export default function CoordinationPanel() {
                 </span>
               </div>
               <p className="font-mono text-xs text-slate-900/40 truncate">{inc.description}</p>
-              <div className="flex items-center justify-between mt-1">
-                <span className={`text-xs font-mono px-1 py-0.5 rounded border ${INC_STATUS_STYLE[inc.status]}`}>
-                  {inc.status}
-                </span>
-                {inc.status !== 'RESOLVED' && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); resolveIncident(inc.id) }}
-                    className="text-xs font-mono text-slate-900/30 hover:text-accent/70 transition-colors"
-                  >
-                    RESOLVE
-                  </button>
-                )}
+              <div className="flex items-center justify-between mt-1 gap-1">
+                <div className="flex items-center gap-1">
+                  <span className={`text-xs font-mono px-1 py-0.5 rounded border ${INC_STATUS_STYLE[inc.status]}`}>
+                    {inc.status}
+                  </span>
+                  {!inc.verified && (
+                    <span className="text-xs font-mono px-1 py-0.5 rounded border text-slate-900/40 border-slate-900/10">
+                      UNVERIFIED
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {!inc.verified && user?.role === 'command_staff' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); verifyIncident(inc.id) }}
+                      className="text-xs font-mono text-green-700/70 hover:text-green-700 transition-colors"
+                    >
+                      VERIFY
+                    </button>
+                  )}
+                  {inc.status !== 'RESOLVED' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); resolveIncident(inc.id) }}
+                      className="text-xs font-mono text-slate-900/30 hover:text-accent/70 transition-colors"
+                    >
+                      RESOLVE
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
