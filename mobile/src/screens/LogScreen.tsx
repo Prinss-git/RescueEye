@@ -1,26 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import * as Notifications from 'expo-notifications'
-import { API_BASE } from '../config'
+import { useRecentDetections } from '../api/queries'
 import { colors, font, radius, spacing } from '../theme'
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound:   true,
-    shouldSetBadge:    true,
-    shouldShowBanner:  true,
-    shouldShowList:    true,
-  }),
-})
-
-interface Detection {
-  id:         string
-  class:      string
-  confidence: number
-  lat?:       number
-  lng?:       number
-  timestamp:  string
-}
 
 const CLASS_COLOR: Record<string, string> = {
   person:            colors.alert,
@@ -37,56 +18,30 @@ const CLASS_LABEL: Record<string, string> = {
   structural_damage: 'STRUCTURAL DMG',
 }
 
-async function requestNotifPermission() {
-  const { status } = await Notifications.requestPermissionsAsync()
-  return status === 'granted'
-}
-
 export default function LogScreen() {
-  const [detections,  setDetections]  = useState<Detection[]>([])
-  const [polling,     setPolling]     = useState(true)
-  const [lastCount,   setLastCount]   = useState(0)
-  const seenIds = useRef<Set<string>>(new Set())
+  const [polling, setPolling] = useState(true)
+  // The feed is server-owned, so "clear" hides what's on screen now rather
+  // than deleting anything; later detections still come through.
+  const [clearedAt, setClearedAt] = useState<number | null>(null)
 
-  useEffect(() => { requestNotifPermission() }, [])
+  // This is an ambient awareness feed of raw AI detections, not dispatch.
+  // It deliberately no longer raises a local notification per detection:
+  // unverified detections anywhere in the AOI aren't this responder's
+  // business, and the noise would bury the dispatch pushes that are.
+  const { data, isLoading, error } = useRecentDetections(polling)
 
-  useEffect(() => {
-    if (!polling) return
+  const detections = useMemo(() => {
+    const list = Array.isArray(data) ? data : []
+    if (clearedAt === null) return list
+    return list.filter(d => new Date(d.timestamp).getTime() > clearedAt)
+  }, [data, clearedAt])
 
-    async function poll() {
-      try {
-        const r = await fetch(`${API_BASE}/detections/recent`, { signal: AbortSignal.timeout(4000) })
-        if (!r.ok) return
-        const data: Detection[] = await r.json()
-        if (!Array.isArray(data)) return
+  const lastCount = detections.length
 
-        // Find new detections not seen before
-        const newOnes = data.filter(d => !seenIds.current.has(d.id) && d.class === 'person')
-        newOnes.forEach(d => seenIds.current.add(d.id))
-
-        if (newOnes.length > 0) {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `⚠️ Casualty Detected`,
-              body:  `${newOnes.length} person${newOnes.length > 1 ? 's' : ''} detected — ${Math.round(newOnes[0].confidence * 100)}% confidence`,
-              data:  { detections: newOnes },
-            },
-            trigger: null,
-          })
-        }
-
-        setDetections(data)
-        setLastCount(data.length)
-      } catch {}
-    }
-
-    poll()
-    const t = setInterval(poll, 3000)
-    return () => clearInterval(t)
-  }, [polling])
-
-  const sorted = [...detections].sort((a, b) =>
-    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  const sorted = useMemo(
+    () => [...detections].sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+    [detections],
   )
 
   return (
@@ -104,17 +59,28 @@ export default function LogScreen() {
               {polling ? 'LIVE' : 'PAUSED'}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.clearBtn} onPress={() => { setDetections([]); seenIds.current.clear(); setLastCount(0) }}>
+          <TouchableOpacity style={s.clearBtn} onPress={() => setClearedAt(Date.now())}>
             <Text style={s.clearText}>CLEAR</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {detections.length === 0 ? (
+      {error && detections.length === 0 ? (
+        <View style={s.empty}>
+          <Text style={s.emptyIcon}>⚠</Text>
+          <Text style={s.emptyText}>DETECTION FEED UNREACHABLE</Text>
+          <Text style={s.emptyHint}>{(error as Error).message}</Text>
+        </View>
+      ) : isLoading ? (
+        <View style={s.empty}>
+          <Text style={s.emptyIcon}>◎</Text>
+          <Text style={s.emptyText}>CONNECTING TO FEED</Text>
+        </View>
+      ) : detections.length === 0 ? (
         <View style={s.empty}>
           <Text style={s.emptyIcon}>◎</Text>
           <Text style={s.emptyText}>SCANNING FOR CASUALTIES</Text>
-          <Text style={s.emptyHint}>Notifications will fire when a person is detected</Text>
+          <Text style={s.emptyHint}>Verified detections are dispatched to you as missions</Text>
         </View>
       ) : (
         <FlatList

@@ -1,41 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import * as Location from 'expo-location'
 import { Ionicons } from '@expo/vector-icons'
 import { useNavigation } from '@react-navigation/native'
-import { SERVER_BASE } from '../config'
 import { useAuth } from '../context/AuthContext'
+import { useIncidents, useMissions, reportLocation } from '../api/queries'
+import { ApiError } from '../api/client'
+import { MISSION_TERMINAL_STATUSES, type Incident, type Mission } from '../types'
 import { colors, font, radius, spacing } from '../theme'
 
 const LOCATION_REPORT_MS = 30_000
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound:  true,
-    shouldSetBadge:   true,
-    shouldShowBanner: true,
-    shouldShowList:   true,
-  }),
-})
-
-export interface Mission {
-  id: string
-  incidentId: string
-  teamId: string
-  status: string
-  medicalRequired: boolean | null
-  createdAt: string
-}
-
-interface Incident {
-  id: string
-  type: string
-  severity: string
-  description: string
-  lat: number
-  lng: number
-}
 
 type IoniconName = keyof typeof Ionicons.glyphMap
 
@@ -58,40 +33,39 @@ const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: colors.alert, HIGH: colors.orange, MEDIUM: colors.amber, LOW: colors.textMuted,
 }
 
-const TERMINAL = ['COMPLETED', 'DECLINED']
-
-async function requestNotifPermission() {
-  const { status } = await Notifications.requestPermissionsAsync()
-  return status === 'granted'
-}
-
 // Reports this device's position every LOCATION_REPORT_MS so verified
 // incidents can be auto-dispatched to the nearest responder.
-async function reportLocation(token: string | null) {
-  if (!token) return
+async function reportCurrentLocation() {
   try {
     const { status } = await Location.requestForegroundPermissionsAsync()
     if (status !== 'granted') return
     const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-    await fetch(`${SERVER_BASE}/me/location`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body:    JSON.stringify({ lat: position.coords.latitude, lng: position.coords.longitude }),
-      signal:  AbortSignal.timeout(5000),
-    })
-  } catch {}
+    await reportLocation(position.coords.latitude, position.coords.longitude)
+  } catch {
+    // Position reporting is best-effort; dispatch falls back to the last
+    // known location rather than failing outright.
+  }
 }
 
 export default function MissionsScreen() {
-  const { user, token } = useAuth()
+  const { user } = useAuth()
   const navigation = useNavigation<any>()
-  const [missions, setMissions]   = useState<Mission[]>([])
-  const [incidents, setIncidents] = useState<Record<string, Incident>>({})
-  const [loading, setLoading]     = useState(true)
-  const seenIds = useRef<Set<string>>(new Set())
 
-  useEffect(() => { requestNotifPermission() }, [])
+  const missionsQuery  = useMissions()
+  const incidentsQuery = useIncidents()
 
+  const missions = missionsQuery.data ?? []
+
+  const incidents = useMemo(() => {
+    const byId: Record<string, Incident> = {}
+    for (const i of incidentsQuery.data ?? []) byId[i.id] = i
+    return byId
+  }, [incidentsQuery.data])
+
+  // Tapping a dispatch push opens that mission. The notification itself now
+  // comes from the server (see server/lib/push.js) rather than being
+  // fabricated locally after a poll, so it arrives even when the app is
+  // closed — which is the only way this is a dispatch system.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const missionId = response.notification.request.content.data?.missionId
@@ -101,53 +75,21 @@ export default function MissionsScreen() {
   }, [navigation])
 
   useEffect(() => {
-    if (!user || user.role !== 'field_responder' || !token) return
-    reportLocation(token)
-    const t = setInterval(() => reportLocation(token), LOCATION_REPORT_MS)
-    return () => clearInterval(t)
-  }, [user, token])
-
-  useEffect(() => {
-    if (!user) return
-    async function poll() {
-      try {
-        const [missionsRes, incidentsRes] = await Promise.all([
-          fetch(`${SERVER_BASE}/missions?userId=${user!.uid}`, { signal: AbortSignal.timeout(4000) }),
-          fetch(`${SERVER_BASE}/incidents`, { signal: AbortSignal.timeout(4000) }),
-        ])
-        if (missionsRes.ok) {
-          const data: Mission[] = await missionsRes.json()
-          const newOnes = data.filter(m => !seenIds.current.has(m.id) && m.status === 'ASSIGNED')
-          newOnes.forEach(m => seenIds.current.add(m.id))
-          data.forEach(m => seenIds.current.add(m.id))
-          if (newOnes.length > 0) {
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title: '🚨 New Mission Assigned',
-                body:  `${newOnes.length} new mission${newOnes.length > 1 ? 's' : ''} dispatched to you`,
-                data:  newOnes.length === 1 ? { missionId: newOnes[0].id } : undefined,
-              },
-              trigger: null,
-            })
-          }
-          setMissions(data)
-        }
-        if (incidentsRes.ok) {
-          const list: Incident[] = await incidentsRes.json()
-          const byId: Record<string, Incident> = {}
-          list.forEach(i => { byId[i.id] = i })
-          setIncidents(byId)
-        }
-      } catch {} finally { setLoading(false) }
-    }
-    poll()
-    const t = setInterval(poll, 4000)
+    if (user?.role !== 'field_responder') return
+    void reportCurrentLocation()
+    const t = setInterval(() => { void reportCurrentLocation() }, LOCATION_REPORT_MS)
     return () => clearInterval(t)
   }, [user])
 
-  const active    = missions.filter(m => !TERMINAL.includes(m.status))
-  const completed = missions.filter(m => TERMINAL.includes(m.status))
+  const active    = missions.filter(m => !MISSION_TERMINAL_STATUSES.includes(m.status))
+  const completed = missions.filter(m => MISSION_TERMINAL_STATUSES.includes(m.status))
   const sections  = [...active, ...completed]
+
+  const loading = missionsQuery.isLoading
+  // Distinguishes "can't reach the server" from "you have no assignments" —
+  // the old bare `catch {}` rendered both as an empty list.
+  const error = missionsQuery.error as ApiError | null
+  const offline = error?.isOffline ?? false
 
   function renderCard(m: Mission) {
     const incident = incidents[m.incidentId]
@@ -155,7 +97,7 @@ export default function MissionsScreen() {
     const isNew = m.status === 'ASSIGNED'
     const icon = incident ? (TYPE_ICON[incident.type] ?? 'help-circle') : 'help-circle'
     const sev = incident ? SEVERITY_COLOR[incident.severity] ?? colors.textMuted : colors.textMuted
-    const done = TERMINAL.includes(m.status)
+    const done = MISSION_TERMINAL_STATUSES.includes(m.status)
 
     return (
       <TouchableOpacity
@@ -195,17 +137,31 @@ export default function MissionsScreen() {
 
   return (
     <View style={s.root}>
-      {/* Duty strip */}
-      <View style={s.duty}>
+      {/* Duty strip — reflects connectivity, since "on duty" is a promise the
+          app can only keep while it can actually reach dispatch. */}
+      <View style={[s.duty, offline && s.dutyOffline]}>
         <View style={s.dutyLeft}>
-          <View style={s.dutyDot} />
-          <Text style={s.dutyText}>On duty · sharing location</Text>
+          <View style={[s.dutyDot, offline && s.dutyDotOffline]} />
+          <Text style={[s.dutyText, offline && s.dutyTextOffline]}>
+            {offline ? 'Offline · reconnecting' : 'On duty · sharing location'}
+          </Text>
         </View>
         <Text style={s.dutyCount}>{active.length} active</Text>
       </View>
 
       {loading ? (
         <View style={s.center}><ActivityIndicator color={colors.navy} /></View>
+      ) : error && sections.length === 0 ? (
+        <View style={s.empty}>
+          <View style={[s.emptyTile, { backgroundColor: colors.alert + '14' }]}>
+            <Ionicons name="cloud-offline-outline" size={30} color={colors.alert} />
+          </View>
+          <Text style={s.emptyText}>Can't reach dispatch</Text>
+          <Text style={s.emptyHint}>{error.message}</Text>
+          <TouchableOpacity style={s.retryBtn} onPress={() => missionsQuery.refetch()}>
+            <Text style={s.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : sections.length === 0 ? (
         <View style={s.empty}>
           <View style={s.emptyTile}>
@@ -220,6 +176,8 @@ export default function MissionsScreen() {
           keyExtractor={m => m.id}
           contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.xl }}
           renderItem={({ item }) => renderCard(item)}
+          refreshing={missionsQuery.isRefetching}
+          onRefresh={() => missionsQuery.refetch()}
         />
       )}
     </View>
@@ -237,6 +195,13 @@ const s = StyleSheet.create({
   dutyDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.emerald },
   dutyText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   dutyCount:{ fontSize: 12, fontWeight: '700', color: colors.navy },
+  dutyOffline:    { backgroundColor: colors.alert + '10', borderBottomColor: colors.alert + '40' },
+  dutyDotOffline: { backgroundColor: colors.alert },
+  dutyTextOffline:{ color: colors.alert },
+
+  retryBtn:  { marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm,
+               borderRadius: radius.pill, backgroundColor: colors.navy },
+  retryText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
   empty:     { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingHorizontal: 40 },
   emptyTile: { width: 68, height: 68, borderRadius: 20, backgroundColor: colors.navyTint,

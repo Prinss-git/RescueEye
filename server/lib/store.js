@@ -303,6 +303,31 @@ function updateUserLocation(uid, lat, lng) {
   return user;
 }
 
+// Stores the Expo push token a responder's device registered, so dispatch can
+// reach them when the app isn't in the foreground. Tokens are per-device and
+// rotate, so the app re-registers on every launch and we simply overwrite.
+function setUserPushToken(uid, pushToken, platform) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  user.pushToken = pushToken;
+  user.pushPlatform = platform || null;
+  user.pushTokenUpdatedAt = new Date().toISOString();
+  _syncUser(user);
+  return user;
+}
+
+// Called on logout — a stale token would otherwise keep delivering another
+// responder's dispatches to whoever signs in on this device next.
+function clearUserPushToken(uid) {
+  const user = users.find(u => u.uid === uid);
+  if (!user) return null;
+  user.pushToken = null;
+  user.pushPlatform = null;
+  user.pushTokenUpdatedAt = new Date().toISOString();
+  _syncUser(user);
+  return user;
+}
+
 function resolveIncident(incidentId) {
   const incident = incidents.find(i => i.id === incidentId);
   if (!incident) return null;
@@ -919,6 +944,8 @@ module.exports = {
   setUserPassword,
   updateUser,
   updateUserLocation,
+  setUserPushToken,
+  clearUserPushToken,
   getMissions,
   getMissionsEnriched,
   getMissionById,

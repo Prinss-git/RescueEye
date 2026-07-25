@@ -5,6 +5,7 @@ import {
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '../context/AuthContext'
+import { ApiError } from '../api/client'
 import { colors, radius, spacing } from '../theme'
 
 export default function LoginScreen() {
@@ -23,8 +24,14 @@ export default function LoginScreen() {
     setLoading(true)
     try {
       await login(email, password)
-    } catch {
-      setError('Invalid credentials. Check your email and password.')
+    } catch (err) {
+      // The server distinguishes bad credentials from a deactivated account,
+      // a pending agency registration, and a lapsed subscription. Collapsing
+      // all of those into "invalid credentials" sent responders hunting for a
+      // password problem that didn't exist.
+      setError(err instanceof ApiError
+        ? err.message
+        : 'Could not sign in. Please try again.')
     } finally {
       setLoading(false)
     }

@@ -3,17 +3,8 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import * as Location from 'expo-location'
 import { Ionicons } from '@expo/vector-icons'
-import { SERVER_BASE } from '../config'
+import { useVerifiedIncidents } from '../api/queries'
 import { colors, spacing, radius } from '../theme'
-
-interface VerifiedIncident {
-  id: string
-  type: string
-  description: string
-  lat: number
-  lng: number
-  droneCallsign: string | null
-}
 
 // Self-contained Leaflet map (loaded via WebView — no native map module or
 // API key needed). RN pushes marker + self-position updates in via
@@ -57,34 +48,26 @@ const MAP_HTML = `<!DOCTYPE html><html><head>
 export default function MapScreen() {
   const webRef = useRef<WebView>(null)
   const [ready, setReady] = useState(false)
-  const [count, setCount] = useState(0)
   const [self, setSelf]   = useState<{ lat: number; lng: number } | null>(null)
 
   function inject(js: string) {
     webRef.current?.injectJavaScript(js + '; true;')
   }
 
-  // Poll verified incidents (drone-spotted casualties) and push to the map.
+  // Verified incidents (drone-spotted casualties), pushed into the Leaflet
+  // WebView whenever the query updates. Fetching and refresh cadence now live
+  // in the query layer; this effect only mirrors data into the map.
+  const { data: incidents } = useVerifiedIncidents()
+  const count = incidents?.length ?? 0
+
   useEffect(() => {
-    async function poll() {
-      try {
-        const res = await fetch(`${SERVER_BASE}/incidents?verified=true`, { signal: AbortSignal.timeout(4000) })
-        if (!res.ok) return
-        const data: VerifiedIncident[] = await res.json()
-        setCount(data.length)
-        if (ready) {
-          const items = data.map((i) => ({
-            type: i.type, lat: i.lat, lng: i.lng, drone: i.droneCallsign,
-            label: i.description || i.type.replace('_', ' '),
-          }))
-          inject(`window.setMarkers(${JSON.stringify(items)})`)
-        }
-      } catch {}
-    }
-    poll()
-    const t = setInterval(poll, 5000)
-    return () => clearInterval(t)
-  }, [ready])
+    if (!ready || !incidents) return
+    const items = incidents.map((i) => ({
+      type: i.type, lat: i.lat, lng: i.lng, drone: i.droneCallsign,
+      label: i.description || i.type.replace('_', ' '),
+    }))
+    inject(`window.setMarkers(${JSON.stringify(items)})`)
+  }, [ready, incidents])
 
   // Track the responder's own position.
   useEffect(() => {

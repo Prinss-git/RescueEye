@@ -2,6 +2,7 @@
 const { Router } = require('express');
 const store = require('../lib/store');
 const { requireAuth, requireRole } = require('../lib/authz');
+const { notifyMissionDispatched } = require('../lib/push');
 
 const router = Router();
 
@@ -90,6 +91,24 @@ router.patch('/:id/verify', requireAuth, requireRole('command_staff'), (req, res
   if (incident.verified) return res.status(400).json({ error: 'Incident already verified' });
 
   const result = store.verifyIncident(req.params.id, req.user.uid, req.user.agencyId);
+
+  // Push the dispatch to the responder's device. Deliberately not awaited:
+  // Command Staff shouldn't wait on Expo's API to see the verification land,
+  // and a push failure must not fail the verification itself.
+  if (result.mission) {
+    notifyMissionDispatched(store, result.mission, result.incident)
+      .then(({ sent, skipped, errors }) => {
+        if (sent === 0) {
+          console.warn(
+            `[push] Mission ${result.mission.id} dispatched but no push delivered ` +
+            `(skipped:${skipped} errors:${errors.join(',') || 'none'}) — ` +
+            'responder may have no registered device.'
+          );
+        }
+      })
+      .catch(err => console.warn('[push] Unexpected failure:', err.message));
+  }
+
   res.json(result);
 });
 

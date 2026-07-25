@@ -1,30 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useNavigation, useRoute } from '@react-navigation/native'
-import { SERVER_BASE } from '../config'
+import { useIncident, useMission, useMissionStatusMutation } from '../api/queries'
+import { ApiError } from '../api/client'
+import type { MissionStatus } from '../types'
 import { colors, font, radius, spacing } from '../theme'
-
-interface Mission {
-  id: string
-  incidentId: string
-  teamId: string
-  status: string
-  medicalRequired: boolean | null
-  notes: string
-  createdAt: string
-  acceptedAt: string | null
-  completedAt: string | null
-}
-interface Incident {
-  id: string
-  type: string
-  severity: string
-  description: string
-  lat: number
-  lng: number
-  droneCallsign?: string | null
-}
 
 type IoniconName = keyof typeof Ionicons.glyphMap
 
@@ -57,43 +37,37 @@ export default function MissionDetailScreen() {
   const route = useRoute<any>()
   const { missionId } = route.params
 
-  const [mission, setMission]   = useState<Mission | null>(null)
-  const [incident, setIncident] = useState<Incident | null>(null)
-  const [loading, setLoading]   = useState(true)
-  const [busy, setBusy]         = useState(false)
+  const missionQuery  = useMission(missionId)
+  const mission       = missionQuery.data ?? null
+  const incidentQuery = useIncident(mission?.incidentId)
+  const incident      = incidentQuery.data ?? null
 
-  const load = useCallback(async () => {
+  const { accept, decline: declineMutation, setStatus } = useMissionStatusMutation(missionId)
+
+  // Any in-flight write disables the action buttons, so a responder can't
+  // double-report a status by tapping twice on a slow connection.
+  const busy = accept.isPending || declineMutation.isPending || setStatus.isPending
+
+  // Surfaced in the UI rather than swallowed: a responder must know if their
+  // "I'm on site" never actually reached dispatch.
+  const actionError =
+    (setStatus.error ?? accept.error ?? declineMutation.error) as ApiError | null
+
+  async function updateStatus(status: MissionStatus, extra: Record<string, unknown> = {}) {
     try {
-      const missionRes = await fetch(`${SERVER_BASE}/missions/${missionId}`)
-      if (!missionRes.ok) return
-      const missionData: Mission = await missionRes.json()
-      setMission(missionData)
-      const incidentRes = await fetch(`${SERVER_BASE}/incidents/${missionData.incidentId}`)
-      if (incidentRes.ok) setIncident(await incidentRes.json())
-    } finally { setLoading(false) }
-  }, [missionId])
-
-  useEffect(() => { load() }, [load])
-
-  async function updateStatus(status: string, extra: Record<string, unknown> = {}) {
-    setBusy(true)
-    try {
-      await fetch(`${SERVER_BASE}/missions/${missionId}/status`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ status, ...extra }),
-      })
-      await load()
-    } finally { setBusy(false) }
+      await setStatus.mutateAsync({ status, ...extra })
+    } catch {
+      // Rendered from actionError below.
+    }
   }
 
   async function decline() {
-    setBusy(true)
     try {
-      await fetch(`${SERVER_BASE}/missions/${missionId}/decline`, { method: 'PATCH' })
-      await load()
+      await declineMutation.mutateAsync()
       navigation.goBack()
-    } finally { setBusy(false) }
+    } catch {
+      // Stay on the screen so the responder can retry.
+    }
   }
 
   function openMaps() {
@@ -102,24 +76,33 @@ export default function MissionDetailScreen() {
   }
 
   // One-press dispatch response: accept, mark en route, and launch navigation.
+  // Navigation only opens if both writes landed — otherwise the responder
+  // drives off while dispatch still shows them as unassigned.
   async function routeToVictim() {
     if (!incident) return
-    setBusy(true)
     try {
-      if (mission?.status === 'ASSIGNED') {
-        await fetch(`${SERVER_BASE}/missions/${missionId}/accept`, { method: 'PATCH' })
-      }
-      await fetch(`${SERVER_BASE}/missions/${missionId}/status`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ status: 'EN_ROUTE' }),
-      })
-      await load()
+      if (mission?.status === 'ASSIGNED') await accept.mutateAsync()
+      await setStatus.mutateAsync({ status: 'EN_ROUTE' })
       openMaps()
-    } finally { setBusy(false) }
+    } catch {
+      // Rendered from actionError below.
+    }
   }
 
-  if (loading || !mission) {
+  if (missionQuery.isLoading || !mission) {
+    if (missionQuery.error) {
+      const err = missionQuery.error as ApiError
+      return (
+        <View style={s.centered}>
+          <Ionicons name="cloud-offline-outline" size={34} color={colors.alert} />
+          <Text style={s.errorTitle}>Can't load this mission</Text>
+          <Text style={s.errorBody}>{err.message}</Text>
+          <TouchableOpacity style={s.retryBtn} onPress={() => missionQuery.refetch()}>
+            <Text style={s.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )
+    }
     return <View style={s.centered}><ActivityIndicator color={colors.navy} /></View>
   }
 
@@ -130,6 +113,15 @@ export default function MissionDetailScreen() {
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
+      {/* A failed status write must be visible — the responder believes
+          dispatch knows where they are based on what this screen shows. */}
+      {actionError && (
+        <View style={s.actionError}>
+          <Ionicons name="warning-outline" size={16} color={colors.alert} />
+          <Text style={s.actionErrorText}>{actionError.message}</Text>
+        </View>
+      )}
+
       {/* Incident hero */}
       <View style={s.hero}>
         <View style={s.heroTop}>
@@ -250,7 +242,19 @@ export default function MissionDetailScreen() {
 const s = StyleSheet.create({
   root:     { flex: 1, backgroundColor: colors.bg },
   content:  { padding: spacing.lg, gap: spacing.md },
-  centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center',
+              gap: spacing.sm, paddingHorizontal: 40 },
+
+  errorTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  errorBody:  { fontSize: 12, color: colors.textMuted, textAlign: 'center', lineHeight: 18 },
+  retryBtn:   { marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm,
+                borderRadius: radius.pill, backgroundColor: colors.navy },
+  retryText:  { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+  actionError:     { flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+                     backgroundColor: colors.alert + '12', borderWidth: 1, borderColor: colors.alert + '40',
+                     borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  actionErrorText: { flex: 1, fontSize: 12, fontWeight: '600', color: colors.alert, lineHeight: 17 },
 
   hero:     { backgroundColor: colors.panel, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.md },
   heroTop:  { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

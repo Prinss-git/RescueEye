@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { colors, radius, spacing, ROLE_LABELS } from '../theme'
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth()
+  const { user, logout, pushWarning } = useAuth()
 
   const roleLabel = user ? (ROLE_LABELS[user.role] ?? user.role.toUpperCase()) : '—'
   const initials  = (user?.displayName ?? '?').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
@@ -24,6 +24,19 @@ export default function ProfileScreen() {
       </View>
 
       <View style={s.content}>
+        {/* A responder who believes they are reachable but isn't is the worst
+            possible failure mode, so a push registration problem is stated
+            plainly rather than logged and forgotten. */}
+        {pushWarning && (
+          <View style={s.pushWarning}>
+            <Ionicons name="notifications-off-outline" size={18} color={colors.alert} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.pushWarningTitle}>Dispatch alerts inactive</Text>
+              <Text style={s.pushWarningText}>{pushWarning}</Text>
+            </View>
+          </View>
+        )}
+
         <View style={s.infoCard}>
           <InfoRow icon="mail-outline" label="Email" value={user?.email ?? '—'} />
           <View style={s.divider} />
@@ -81,6 +94,11 @@ const s = StyleSheet.create({
   infoLabel:{ fontSize: 11, color: colors.textMuted, fontWeight: '600' },
   infoValue:{ fontSize: 14, color: colors.textPrimary, fontWeight: '600', marginTop: 1 },
   divider:  { height: 1, backgroundColor: colors.border, marginHorizontal: spacing.md },
+
+  pushWarning:      { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, padding: spacing.md,
+                      borderRadius: radius.lg, borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fef2f2' },
+  pushWarningTitle: { fontSize: 13, fontWeight: '800', color: colors.alert },
+  pushWarningText:  { fontSize: 12, color: colors.alert, marginTop: 2, lineHeight: 17 },
 
   logoutBtn:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
                 borderRadius: radius.md, borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fef2f2', paddingVertical: 14 },
