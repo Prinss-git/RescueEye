@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, FormEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, FormEvent } from 'react'
+import { Search } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 interface AgencyProfile {
@@ -16,15 +17,9 @@ interface AgencyUser {
   active: boolean
   createdAt: string
   lastLogin: string | null
-}
-
-interface Team {
-  id: string
-  name: string
-  status: string
-  members: string[]
-  memberUserIds: string[]
-  assignedTo: string | null
+  lastLat: number | null
+  lastLng: number | null
+  locationUpdatedAt: string | null
 }
 
 interface MissionRow {
@@ -41,6 +36,33 @@ const SUB_STATUS_STYLE: Record<string, string> = {
   ACTIVE:    'text-green-700 border-green-200 bg-green-50',
   SUSPENDED: 'text-alert border-red-200 bg-red-50',
 }
+
+const ROLE_LABELS: Record<string, string> = {
+  command_staff:    'Command Staff',
+  field_responder:  'Field Responder',
+}
+
+const COMMAND_STAFF_ROLES = ['command_staff']
+const FIELD_RESPONDER_ROLES = ['field_responder']
+
+const TERMINAL_MISSION_STATUSES = ['COMPLETED', 'DECLINED']
+
+type RoleFilter = 'ALL' | 'command_staff' | 'field_responder'
+type MissionFilter = 'ACTIVE' | 'COMPLETED'
+
+// Since dispatch is nearest-responder-by-location, every Field Responder's
+// app already pings its location every 30s for auto-dispatch — this just
+// surfaces that data instead of leaving it invisible.
+function checkInStatus(iso: string | null): { label: string; dot: string } {
+  if (!iso) return { label: 'Never checked in', dot: 'bg-slate-300' }
+  const minutesAgo = (Date.now() - new Date(iso).getTime()) / 60_000
+  const label = minutesAgo < 1 ? 'Just now' : `${Math.round(minutesAgo)} min ago`
+  if (minutesAgo <= 5)  return { label, dot: 'bg-green-500' }
+  if (minutesAgo <= 30) return { label, dot: 'bg-amber-500' }
+  return { label, dot: 'bg-slate-300' }
+}
+
+// ── Agency profile bar ───────────────────────────────────────────────────────
 
 function AgencyProfilePanel({ agency, onRename }: {
   agency: AgencyProfile
@@ -90,248 +112,243 @@ function AgencyProfilePanel({ agency, onRename }: {
   )
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  command_staff:    'Command Staff',
-  field_responder:  'Field Responder',
+// ── Stat strip ───────────────────────────────────────────────────────────────
+
+function StatTile({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="panel p-4 flex-1">
+      <span className="text-xs text-slate-400">{label}</span>
+      <p className="text-2xl font-semibold text-slate-800 mt-1">{count}</p>
+    </div>
+  )
 }
 
-const COMMAND_STAFF_ROLES = ['command_staff']
-const FIELD_RESPONDER_ROLES = ['field_responder']
+// ── User list (left column) ─────────────────────────────────────────────────
 
-function UserRow({ user, onToggleActive, onEdit, onResetPassword }: {
+function UserListRow({ user, selected, onClick }: {
+  user: AgencyUser; selected: boolean; onClick: () => void
+}) {
+  const isResponder = FIELD_RESPONDER_ROLES.includes(user.role)
+  const check = isResponder ? checkInStatus(user.locationUpdatedAt) : null
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left p-3 rounded-md border transition-colors ${
+        selected ? 'border-accent bg-accent-tint' : 'border-slate-200 bg-surface-alt hover:border-slate-300'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-slate-800 truncate">{user.displayName}</span>
+        {check && <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${check.dot}`} />}
+      </div>
+      <p className="text-xs text-slate-400 truncate mt-0.5">{user.email}</p>
+      <div className="flex items-center gap-1.5 mt-1">
+        <span className="badge border-accent/30 text-accent">{ROLE_LABELS[user.role] ?? user.role}</span>
+        {!user.active && <span className="badge border-red-200 text-alert">Deactivated</span>}
+      </div>
+    </button>
+  )
+}
+
+// ── User detail (right column) ──────────────────────────────────────────────
+
+function UserDetailPanel({ user, onToggleActive, onEdit, onResetPassword }: {
   user: AgencyUser
-  onToggleActive: (u: AgencyUser) => void
+  onToggleActive: (u: AgencyUser) => Promise<void>
   onEdit: (uid: string, name: string, email: string) => Promise<void>
   onResetPassword: (uid: string, password: string) => Promise<void>
 }) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName]       = useState(user.displayName)
-  const [email, setEmail]     = useState(user.email)
-  const [resetting, setResetting]     = useState(false)
+  const [name, setName]   = useState(user.displayName)
+  const [email, setEmail] = useState(user.email)
   const [newPassword, setNewPassword] = useState('')
-  const [busy, setBusy]       = useState(false)
+  const [busy, setBusy]   = useState(false)
+
+  useEffect(() => { setName(user.displayName); setEmail(user.email); setNewPassword('') }, [user.uid])
+
+  const isResponder = FIELD_RESPONDER_ROLES.includes(user.role)
+  const check = isResponder ? checkInStatus(user.locationUpdatedAt) : null
 
   async function saveEdit() {
+    if (!name.trim() || !email.trim()) return
     setBusy(true)
-    try { await onEdit(user.uid, name.trim(), email.trim()) } finally { setBusy(false); setEditing(false) }
+    try { await onEdit(user.uid, name.trim(), email.trim()) } finally { setBusy(false) }
   }
 
   async function submitReset() {
     if (!newPassword) return
     setBusy(true)
-    try { await onResetPassword(user.uid, newPassword) } finally {
-      setBusy(false); setResetting(false); setNewPassword('')
-    }
+    try { await onResetPassword(user.uid, newPassword) } finally { setBusy(false); setNewPassword('') }
   }
 
-  if (editing) {
-    return (
-      <div className="p-3 rounded-md border border-slate-200 bg-surface-alt space-y-2">
-        <div className="flex gap-2">
-          <input className="input-field text-sm py-1" placeholder="Name" value={name}
-            onChange={(e) => setName(e.target.value)} disabled={busy} />
-          <input className="input-field text-sm py-1" placeholder="Email" value={email}
-            onChange={(e) => setEmail(e.target.value)} disabled={busy} />
-        </div>
-        <div className="flex gap-2">
-          <button onClick={saveEdit} className="btn-primary text-xs" disabled={busy || !name.trim() || !email.trim()}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-          <button onClick={() => { setEditing(false); setName(user.displayName); setEmail(user.email) }}
-            className="btn-ghost text-xs" disabled={busy}>Cancel</button>
-        </div>
-      </div>
-    )
+  async function toggle() {
+    setBusy(true)
+    try { await onToggleActive(user) } finally { setBusy(false) }
   }
 
   return (
-    <div className="p-3 rounded-md border border-slate-200 bg-surface-alt space-y-2">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-800 truncate">{user.displayName}</span>
-            <span className="badge border-accent/30 text-accent">
-              {ROLE_LABELS[user.role] ?? user.role}
-            </span>
-            {!user.active && (
-              <span className="badge border-red-200 text-alert">
-                Deactivated
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-slate-400 truncate">{user.email}</p>
+    <div className="panel flex-1 overflow-y-auto p-5 space-y-5">
+      <div>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-slate-800">{user.displayName}</h2>
+          <span className="badge border-accent/30 text-accent">{ROLE_LABELS[user.role] ?? user.role}</span>
+          {!user.active && <span className="badge border-red-200 text-alert">Deactivated</span>}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button onClick={() => setEditing(true)} className="btn-ghost text-xs">Edit</button>
-          <button onClick={() => setResetting((r) => !r)} className="btn-ghost text-xs">
-            {resetting ? 'Cancel' : 'Reset Password'}
-          </button>
-          <button onClick={() => onToggleActive(user)} className="btn-ghost text-xs">
-            {user.active ? 'Deactivate' : 'Reactivate'}
-          </button>
-        </div>
+        <p className="text-xs text-slate-400 mt-1">{user.email}</p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          {user.lastLogin ? `Last login ${new Date(user.lastLogin).toLocaleString()}` : 'Never logged in'}
+        </p>
       </div>
 
-      {resetting && (
-        <div className="flex gap-2">
-          <input className="input-field text-xs py-1" type="password" placeholder="New password"
-            value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={busy} />
-          <button onClick={submitReset} className="btn-primary text-xs flex-shrink-0" disabled={busy || !newPassword}>
-            {busy ? 'Saving…' : 'Set Password'}
-          </button>
+      {check && (
+        <div className="pt-2 border-t border-slate-100">
+          <p className="text-xs font-medium text-slate-600 mb-1">Location Check-in</p>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${check.dot}`} />
+            <span className="text-sm text-slate-600">{check.label}</span>
+          </div>
         </div>
       )}
-    </div>
-  )
-}
 
-function RoleGroup({ title, roles, users, onToggleActive, onEdit, onResetPassword }: {
-  title: string; roles: string[]; users: AgencyUser[]
-  onToggleActive: (u: AgencyUser) => void
-  onEdit: (uid: string, name: string, email: string) => Promise<void>
-  onResetPassword: (uid: string, password: string) => Promise<void>
-}) {
-  const filtered = users.filter((u) => roles.includes(u.role))
-  return (
-    <div className="panel overflow-hidden">
-      <div className="panel-header">{title} ({filtered.length})</div>
-      <div className="p-3 space-y-2">
-        {filtered.length === 0 && (
-          <p className="text-sm text-slate-400 text-center py-4">— none yet —</p>
-        )}
-        {filtered.map((u) => (
-          <UserRow key={u.uid} user={u} onToggleActive={onToggleActive} onEdit={onEdit} onResetPassword={onResetPassword} />
-        ))}
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-xs font-medium text-slate-600">Edit Name / Email</p>
+        <div className="flex gap-2">
+          <input className="input-field text-sm py-1.5" placeholder="Name" value={name}
+            onChange={(e) => setName(e.target.value)} disabled={busy} />
+          <input className="input-field text-sm py-1.5" placeholder="Email" value={email}
+            onChange={(e) => setEmail(e.target.value)} disabled={busy} />
+          <button onClick={saveEdit} className="btn-primary text-xs flex-shrink-0" disabled={busy}>Save</button>
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-xs font-medium text-slate-600">Reset Password</p>
+        <div className="flex gap-2">
+          <input className="input-field text-sm py-1.5" type="password" placeholder="New password"
+            value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={busy} />
+          <button onClick={submitReset} className="btn-primary text-xs flex-shrink-0" disabled={busy || !newPassword}>
+            Set
+          </button>
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-slate-100">
+        <button onClick={toggle} className="btn-ghost text-sm" disabled={busy}>
+          {user.active ? 'Deactivate User' : 'Reactivate User'}
+        </button>
       </div>
     </div>
   )
 }
 
-function TeamsPanel({ teams, users, onCreateTeam, onAddMember, onRemoveMember, onDeleteTeam }: {
-  teams: Team[]
-  users: AgencyUser[]
-  onCreateTeam: (name: string) => Promise<void>
-  onAddMember: (teamId: string, userId: string) => void
-  onRemoveMember: (teamId: string, userId: string) => void
-  onDeleteTeam: (teamId: string) => void
+// ── Add user (right column, create mode) ────────────────────────────────────
+
+function AddUserPanel({ onCreate, onCancel }: {
+  onCreate: (name: string, email: string, password: string, role: string) => Promise<boolean>
+  onCancel: () => void
 }) {
-  const [showForm, setShowForm] = useState(false)
   const [name, setName]         = useState('')
+  const [email, setEmail]       = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole]         = useState('command_staff')
+  const [error, setError]       = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [pendingUser, setPendingUser] = useState<Record<string, string>>({})
 
-  const responders = users.filter((u) => FIELD_RESPONDER_ROLES.includes(u.role) && u.active)
-
-  async function handleCreate(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
-    if (!name.trim()) return
+    setError('')
+    if (!name || !email || !password) {
+      setError('All fields are required.')
+      return
+    }
     setSubmitting(true)
     try {
-      await onCreateTeam(name.trim())
-      setName('')
-      setShowForm(false)
+      const ok = await onCreate(name, email, password, role)
+      if (!ok) setError('Failed to create user — email may already be in use.')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="panel overflow-hidden">
-      <div className="panel-header flex items-center justify-between">
-        <span>Teams ({teams.length})</span>
-        <button onClick={() => setShowForm((s) => !s)} className="text-accent text-xs font-medium normal-case">
-          {showForm ? 'Cancel' : '+ Add Team'}
-        </button>
+    <form onSubmit={submit} className="panel flex-1 overflow-y-auto p-5 space-y-4">
+      <p className="text-sm font-semibold text-slate-700">New User</p>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+        <input className="input-field" value={name} onChange={(e) => setName(e.target.value)}
+          placeholder="Maria Santos" disabled={submitting} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+        <input className="input-field" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+          placeholder="maria@agency.ph" disabled={submitting} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Password</label>
+        <input className="input-field" type="password" value={password}
+          onChange={(e) => setPassword(e.target.value)} disabled={submitting} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Role</label>
+        <select className="input-field" value={role} onChange={(e) => setRole(e.target.value)} disabled={submitting}>
+          <optgroup label="Command Staff">
+            {COMMAND_STAFF_ROLES.map((r) => (
+              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Field Responders">
+            {FIELD_RESPONDER_ROLES.map((r) => (
+              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+            ))}
+          </optgroup>
+        </select>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="p-3 border-b border-slate-200 flex gap-2">
-          <input className="input-field text-sm" placeholder="Team name (e.g. Foxtrot Team)"
-            value={name} onChange={(e) => setName(e.target.value)} disabled={submitting} />
-          <button type="submit" className="btn-primary text-xs flex-shrink-0" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create'}
-          </button>
-        </form>
+      {error && (
+        <p className="text-alert text-xs border border-red-200 bg-red-50 rounded px-3 py-2">{error}</p>
       )}
 
-      <div className="p-3 space-y-3">
-        {teams.length === 0 && (
-          <p className="text-sm text-slate-400 text-center py-4">— no teams yet —</p>
-        )}
-        {teams.map((team) => {
-          const memberUsers = team.memberUserIds
-            .map((uid) => responders.find((u) => u.uid === uid))
-            .filter((u): u is AgencyUser => !!u)
-          const available = responders.filter((u) => !team.memberUserIds.includes(u.uid))
-          return (
-            <div key={team.id} className="p-3 rounded-md border border-slate-200 bg-surface-alt space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-800">{team.name}</span>
-                <div className="flex items-center gap-2">
-                  <span className="badge border-slate-200 text-slate-500">{team.status}</span>
-                  <button
-                    onClick={() => onDeleteTeam(team.id)}
-                    className="text-xs text-alert hover:underline disabled:no-underline disabled:text-slate-300"
-                    disabled={team.status !== 'STANDBY'}
-                    title={team.status !== 'STANDBY' ? 'Cannot delete — team is currently dispatched' : 'Delete team'}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {memberUsers.length === 0 && (
-                  <span className="text-xs text-slate-400">No members yet</span>
-                )}
-                {memberUsers.map((u) => (
-                  <span key={u.uid} className="badge border-accent/30 text-accent gap-1.5">
-                    {u.displayName} · {ROLE_LABELS[u.role]}
-                    <button onClick={() => onRemoveMember(team.id, u.uid)} className="text-alert hover:text-red-700">×</button>
-                  </span>
-                ))}
-              </div>
-
-              {available.length > 0 && (
-                <div className="flex gap-1.5">
-                  <select className="input-field text-xs py-1"
-                    value={pendingUser[team.id] || ''}
-                    onChange={(e) => setPendingUser((p) => ({ ...p, [team.id]: e.target.value }))}>
-                    <option value="">— add a responder —</option>
-                    {available.map((u) => (
-                      <option key={u.uid} value={u.uid}>{u.displayName} ({ROLE_LABELS[u.role]})</option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn-ghost text-xs flex-shrink-0"
-                    disabled={!pendingUser[team.id]}
-                    onClick={() => {
-                      const uid = pendingUser[team.id]
-                      if (!uid) return
-                      onAddMember(team.id, uid)
-                      setPendingUser((p) => ({ ...p, [team.id]: '' }))
-                    }}>
-                    Add
-                  </button>
-                </div>
-              )}
-            </div>
-          )
-        })}
+      <div className="flex gap-2">
+        <button type="submit" className="btn-primary text-sm" disabled={submitting}>
+          {submitting ? 'Creating…' : 'Create User'}
+        </button>
+        <button type="button" onClick={onCancel} className="btn-ghost text-sm" disabled={submitting}>Cancel</button>
       </div>
-    </div>
+    </form>
   )
 }
 
+// ── Mission history ──────────────────────────────────────────────────────────
+
 function MissionHistoryPanel({ missions }: { missions: MissionRow[] }) {
+  const [filter, setFilter] = useState<MissionFilter>('ACTIVE')
+  const filtered = missions.filter((m) =>
+    filter === 'ACTIVE' ? !TERMINAL_MISSION_STATUSES.includes(m.status) : TERMINAL_MISSION_STATUSES.includes(m.status)
+  )
+
   return (
     <div className="panel overflow-hidden">
-      <div className="panel-header">Mission History ({missions.length})</div>
+      <div className="panel-header flex items-center justify-between">
+        <span>Mission History ({filtered.length})</span>
+        <div className="flex gap-1 normal-case font-normal">
+          {(['ACTIVE', 'COMPLETED'] as MissionFilter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                filter === f ? 'bg-accent/20 text-accent border border-accent/40' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {f === 'ACTIVE' ? 'Active' : 'Completed'}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
-        {missions.length === 0 && (
-          <p className="text-sm text-slate-400 text-center py-4">— no missions yet —</p>
+        {filtered.length === 0 && (
+          <p className="text-sm text-slate-400 text-center py-4">— no missions —</p>
         )}
-        {missions.map((m) => (
+        {filtered.map((m) => (
           <div key={m.id} className="p-2.5 rounded-md border border-slate-200 bg-surface-alt flex items-center justify-between gap-4 text-xs">
             <div className="min-w-0 flex-1">
               <span className="font-semibold text-slate-700">{m.teamName ?? '—'}</span>
@@ -348,21 +365,19 @@ function MissionHistoryPanel({ missions }: { missions: MissionRow[] }) {
   )
 }
 
+// ── Main ─────────────────────────────────────────────────────────────────────
+
 export default function AgencyAdminDashboard() {
   const { token } = useAuth()
   const [agency, setAgency]     = useState<AgencyProfile | null>(null)
   const [users, setUsers]       = useState<AgencyUser[]>([])
-  const [teams, setTeams]       = useState<Team[]>([])
   const [missions, setMissions] = useState<MissionRow[]>([])
   const [loading, setLoading]   = useState(true)
-  const [showForm, setShowForm] = useState(false)
 
-  const [name, setName]         = useState('')
-  const [email, setEmail]       = useState('')
-  const [password, setPassword] = useState('')
-  const [role, setRole]         = useState('command_staff')
-  const [error, setError]       = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL')
+  const [search, setSearch]         = useState('')
+  const [selectedUid, setSelectedUid] = useState<string | null>(null)
+  const [adding, setAdding]         = useState(false)
 
   const authHeaders = useCallback((): HeadersInit => ({
     'Content-Type': 'application/json',
@@ -383,17 +398,33 @@ export default function AgencyAdminDashboard() {
     }
   }, [authHeaders])
 
-  const fetchTeams = useCallback(async () => {
-    const res = await fetch('/server/agency/teams', { headers: authHeaders() })
-    if (res.ok) setTeams(await res.json())
-  }, [authHeaders])
-
   const fetchMissions = useCallback(async () => {
     const res = await fetch('/server/agency/missions', { headers: authHeaders() })
     if (res.ok) setMissions(await res.json())
   }, [authHeaders])
 
-  useEffect(() => { fetchAgency(); fetchUsers(); fetchTeams(); fetchMissions() }, [fetchAgency, fetchUsers, fetchTeams, fetchMissions])
+  useEffect(() => { fetchAgency(); fetchUsers(); fetchMissions() }, [fetchAgency, fetchUsers, fetchMissions])
+
+  const commandStaffCount   = useMemo(() => users.filter((u) => COMMAND_STAFF_ROLES.includes(u.role)).length, [users])
+  const fieldResponderCount = useMemo(() => users.filter((u) => FIELD_RESPONDER_ROLES.includes(u.role)).length, [users])
+  const activeMissionCount  = useMemo(() => missions.filter((m) => !TERMINAL_MISSION_STATUSES.includes(m.status)).length, [missions])
+
+  const filteredUsers = useMemo(() => {
+    let list = users
+    if (roleFilter !== 'ALL') list = list.filter((u) => u.role === roleFilter)
+    const q = search.trim().toLowerCase()
+    if (q) list = list.filter((u) => u.displayName.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+    return list
+  }, [users, roleFilter, search])
+
+  useEffect(() => {
+    if (adding) return
+    if (!filteredUsers.some((u) => u.uid === selectedUid)) {
+      setSelectedUid(filteredUsers[0]?.uid ?? null)
+    }
+  }, [filteredUsers, selectedUid, adding])
+
+  const selectedUser = filteredUsers.find((u) => u.uid === selectedUid) ?? null
 
   async function renameAgency(newName: string) {
     await fetch('/server/agency/profile', {
@@ -404,32 +435,16 @@ export default function AgencyAdminDashboard() {
     fetchAgency()
   }
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault()
-    setError('')
-    if (!name || !email || !password) {
-      setError('All fields are required.')
-      return
-    }
-    setSubmitting(true)
-    try {
-      const res = await fetch('/server/agency/users', {
-        method:  'POST',
-        headers: authHeaders(),
-        body:    JSON.stringify({ name, email, password, role }),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || 'Failed to create user')
-      }
-      setName(''); setEmail(''); setPassword(''); setRole('command_staff')
-      setShowForm(false)
-      fetchUsers()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create user')
-    } finally {
-      setSubmitting(false)
-    }
+  async function createUser(name: string, email: string, password: string, role: string): Promise<boolean> {
+    const res = await fetch('/server/agency/users', {
+      method:  'POST',
+      headers: authHeaders(),
+      body:    JSON.stringify({ name, email, password, role }),
+    })
+    if (!res.ok) return false
+    setAdding(false)
+    fetchUsers()
+    return true
   }
 
   async function toggleActive(user: AgencyUser) {
@@ -439,32 +454,6 @@ export default function AgencyAdminDashboard() {
       body:    JSON.stringify({ active: !user.active }),
     })
     fetchUsers()
-  }
-
-  async function createTeam(teamName: string) {
-    await fetch('/server/agency/teams', {
-      method:  'POST',
-      headers: authHeaders(),
-      body:    JSON.stringify({ name: teamName }),
-    })
-    fetchTeams()
-  }
-
-  async function addMember(teamId: string, userId: string) {
-    await fetch(`/server/agency/teams/${teamId}/members`, {
-      method:  'POST',
-      headers: authHeaders(),
-      body:    JSON.stringify({ userId }),
-    })
-    fetchTeams()
-  }
-
-  async function removeMember(teamId: string, userId: string) {
-    await fetch(`/server/agency/teams/${teamId}/members/${userId}`, {
-      method:  'DELETE',
-      headers: authHeaders(),
-    })
-    fetchTeams()
   }
 
   async function editUser(uid: string, editName: string, editEmail: string) {
@@ -484,90 +473,87 @@ export default function AgencyAdminDashboard() {
     })
   }
 
-  async function deleteTeam(teamId: string) {
-    if (!window.confirm('Delete this team? This cannot be undone.')) return
-    const res = await fetch(`/server/agency/teams/${teamId}`, {
-      method:  'DELETE',
-      headers: authHeaders(),
-    })
-    if (res.ok) fetchTeams()
-  }
+  const ROLE_TABS: { key: RoleFilter; label: string }[] = [
+    { key: 'ALL',              label: 'All' },
+    { key: 'command_staff',    label: 'Command Staff' },
+    { key: 'field_responder',  label: 'Field Responders' },
+  ]
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-slate-800">Agency Admin</h1>
-          <p className="text-sm text-slate-400 mt-1">Manage Command Staff, Field Responder accounts, and teams</p>
+          <p className="text-sm text-slate-400 mt-1">Manage Command Staff and Field Responder accounts</p>
         </div>
-        <button className="btn-primary text-sm" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : '+ Add User'}
+        <button className="btn-primary text-sm" onClick={() => { setAdding(true); setSelectedUid(null) }}>
+          + Add User
         </button>
       </div>
 
       {agency && <AgencyProfilePanel agency={agency} onRename={renameAgency} />}
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="panel p-5 space-y-4">
-          <p className="text-sm font-semibold text-slate-700 mb-1">New User</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
-              <input className="input-field" value={name} onChange={(e) => setName(e.target.value)}
-                placeholder="Maria Santos" disabled={submitting} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
-              <input className="input-field" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="maria@agency.ph" disabled={submitting} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Password</label>
-              <input className="input-field" type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)} disabled={submitting} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Role</label>
-              <select className="input-field" value={role} onChange={(e) => setRole(e.target.value)} disabled={submitting}>
-                <optgroup label="Command Staff">
-                  {COMMAND_STAFF_ROLES.map((r) => (
-                    <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Field Responders">
-                  {FIELD_RESPONDER_ROLES.map((r) => (
-                    <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-          </div>
+      <div className="flex gap-3">
+        <StatTile label="Total Users" count={users.length} />
+        <StatTile label="Command Staff" count={commandStaffCount} />
+        <StatTile label="Field Responders" count={fieldResponderCount} />
+        <StatTile label="Active Missions" count={activeMissionCount} />
+      </div>
 
-          {error && (
-            <p className="text-alert text-xs border border-red-200 bg-red-50 rounded px-3 py-2">{error}</p>
-          )}
-
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create User'}
+      <div className="flex gap-2 border-b border-slate-200">
+        {ROLE_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setRoleFilter(t.key)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              roleFilter === t.key ? 'border-accent text-accent' : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            {t.label}
           </button>
-        </form>
-      )}
+        ))}
+      </div>
 
-      {loading ? (
-        <p className="text-sm text-slate-400 text-center py-6">Loading…</p>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-4">
-            <RoleGroup title="Command Staff" roles={COMMAND_STAFF_ROLES} users={users}
-              onToggleActive={toggleActive} onEdit={editUser} onResetPassword={resetUserPassword} />
-            <RoleGroup title="Field Responders" roles={FIELD_RESPONDER_ROLES} users={users}
-              onToggleActive={toggleActive} onEdit={editUser} onResetPassword={resetUserPassword} />
+      <div className="flex gap-4" style={{ minHeight: 420 }}>
+        {/* Left: roster */}
+        <div className="w-72 flex-shrink-0 flex flex-col gap-3">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              className="input-field text-sm py-1.5 pl-8"
+              placeholder="Search by name or email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-          <TeamsPanel teams={teams} users={users} onCreateTeam={createTeam} onAddMember={addMember}
-            onRemoveMember={removeMember} onDeleteTeam={deleteTeam} />
-          <MissionHistoryPanel missions={missions} />
-        </>
-      )}
+
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            {loading && <p className="text-sm text-slate-400 text-center py-6">Loading…</p>}
+            {!loading && filteredUsers.length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-6">
+                {search ? '— no matches —' : '— no users yet —'}
+              </p>
+            )}
+            {filteredUsers.map((u) => (
+              <UserListRow key={u.uid} user={u} selected={!adding && u.uid === selectedUid}
+                onClick={() => { setAdding(false); setSelectedUid(u.uid) }} />
+            ))}
+          </div>
+        </div>
+
+        {/* Right: detail / add */}
+        {adding ? (
+          <AddUserPanel onCreate={createUser} onCancel={() => setAdding(false)} />
+        ) : selectedUser ? (
+          <UserDetailPanel user={selectedUser} onToggleActive={toggleActive} onEdit={editUser} onResetPassword={resetUserPassword} />
+        ) : (
+          <div className="panel flex-1 flex items-center justify-center">
+            <p className="text-sm text-slate-400">Select a user to view details</p>
+          </div>
+        )}
+      </div>
+
+      <MissionHistoryPanel missions={missions} />
     </div>
   )
 }

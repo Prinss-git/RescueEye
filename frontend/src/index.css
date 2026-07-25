@@ -22,6 +22,33 @@
   50%       { opacity: 0.4; }
 }
 
+/* ── Landing page motion primitives ──────────────────────────────────────── */
+@keyframes radarSweep   { to { transform: rotate(360deg); } }
+@keyframes blipPing     { 0% { transform: scale(0.5); opacity: 0; } 25% { opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes floatY       { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+@keyframes liveDot      { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(52,211,153,0.55); } 50% { opacity: 0.75; box-shadow: 0 0 0 5px rgba(52,211,153,0); } }
+@keyframes scanDown     { 0% { top: -8%; } 100% { top: 108%; } }
+@keyframes gridDrift    { to { background-position: 40px 40px; } }
+@keyframes shimmerText  { to { background-position: 200% center; } }
+@keyframes scrollNudge  { 0%, 100% { transform: translateY(0); opacity: 0.4; } 50% { transform: translateY(6px); opacity: 1; } }
+
+.re-radar-sweep { animation: radarSweep 4.5s linear infinite; }
+.re-float       { animation: floatY 6s ease-in-out infinite; }
+.re-live-dot    { animation: liveDot 1.8s ease-in-out infinite; }
+.re-scan        { animation: scanDown 3.8s ease-in-out infinite; }
+.re-grid-drift  { animation: gridDrift 6s linear infinite; }
+.re-scroll-nudge{ animation: scrollNudge 1.8s ease-in-out infinite; }
+.re-shimmer {
+  background-size: 200% auto;
+  animation: shimmerText 5s linear infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .re-radar-sweep, .re-float, .re-live-dot, .re-scan, .re-grid-drift, .re-scroll-nudge, .re-shimmer { animation: none; }
+}
+
 @layer components {
   .panel {
     @apply bg-surface border border-slate-200 rounded-lg shadow-card;
