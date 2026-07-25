@@ -157,8 +157,8 @@ const s = StyleSheet.create({
                  paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
                  borderBottomWidth: 1, borderBottomColor: colors.border,
                  backgroundColor: colors.panel },
-  title:       { fontFamily: font.mono, fontSize: 13, fontWeight: 'bold', color: colors.textSecondary, letterSpacing: 2 },
-  sub:         { fontFamily: font.mono, fontSize: 9, color: colors.textMuted, marginTop: 2 },
+  title:       { fontSize: 15, fontWeight: '800', color: colors.textPrimary },
+  sub:         { fontSize: 11, color: colors.textMuted, marginTop: 2 },
   headerRight: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   pollBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5,
                  borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
@@ -181,5 +181,5 @@ const s = StyleSheet.create({
   cardTime:    { fontFamily: font.mono, fontSize: 9, color: colors.textMuted },
   barBg:       { height: 2, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' },
   barFill:     { height: 2, borderRadius: 2 },
-  cardCoords:  { fontFamily: font.mono, fontSize: 9, color: colors.cyan },
+  cardCoords:  { fontFamily: font.mono, fontSize: 9, color: colors.navy },
 })

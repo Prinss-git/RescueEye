@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom'
-import { Video, Map as MapIcon, Users, BarChart3, Building2, UserCog } from 'lucide-react'
+import { Video, Map as MapIcon, Siren, Users, History, Building2, UserCog } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const OPERATIONAL_LINKS = [
-  { to: '/dashboard',    label: 'Live Feed',    icon: Video },
-  { to: '/map',          label: 'Damage Map',   icon: MapIcon },
-  { to: '/coordination', label: 'Coordination', icon: Users },
-  { to: '/evaluation',   label: 'Evaluation',   icon: BarChart3 },
+  { to: '/dashboard',  label: 'Live Feed',   icon: Video },
+  { to: '/map',        label: 'Damage Map',  icon: MapIcon },
+  { to: '/incidents',  label: 'Incidents',   icon: Siren },
+  { to: '/responders', label: 'Responders',  icon: Users },
+  { to: '/history',    label: 'History',     icon: History },
 ]
 
 const SYSTEM_ADMIN_LINKS = [

@@ -27,7 +27,7 @@ from services.yolo_model import (
     get_victim_ort_session,
     victim_state,
 )
-from services.detection_store import add_detections
+from services.detection_store import add_detections, random_coord
 from services.tracker import Sort
 from routers.logs import append_log
 
@@ -38,6 +38,8 @@ LATENCY_WARN_MS      = float(os.getenv("LATENCY_WARN_MS",      "3000"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.40"))
 INCIDENT_CONF_MIN    = float(os.getenv("INCIDENT_CONF_MIN",    "0.75"))
 NODE_SERVER_URL      = os.getenv("NODE_SERVER_URL", "http://localhost:3001")
+DRONE_ID             = os.getenv("DRONE_ID", "DRN-01")
+DRONE_CALLSIGN       = os.getenv("DRONE_CALLSIGN", "Rescue-1")
 NTFY_TOPIC           = os.getenv("NTFY_TOPIC", "rescueeye-alerts")
 NTFY_MIN_CONF        = float(os.getenv("NTFY_MIN_CONF", "0.10"))
 GRID_COOLDOWN_S      = 10.0
@@ -87,9 +89,15 @@ async def _maybe_create_incident(detection: dict) -> None:
                     "severity":    "HIGH" if detection["confidence"] >= 0.90 else "MEDIUM",
                     "description": (
                         f"AI detected {detection['class']} "
-                        f"(conf={detection['confidence']:.2f}) via drone feed"
+                        f"(conf={detection['confidence']:.2f}) via {DRONE_CALLSIGN}"
                     ),
-                    "reportedBy": "AI_SYSTEM",
+                    "reportedBy":    "AI_SYSTEM",
+                    # Where the drone spotted the casualty — the incident is
+                    # pinned here, and the map shows "spotted by <callsign>".
+                    "lat":           detection.get("lat"),
+                    "lng":           detection.get("lng"),
+                    "droneId":       DRONE_ID,
+                    "droneCallsign": DRONE_CALLSIGN,
                 },
             )
     except Exception as exc:
@@ -498,10 +506,10 @@ async def detect_objects(payload: dict = Body(...)):
             f"[detect] LATENCY EXCEEDED: {inference_ms:.0f}ms > {LATENCY_WARN_MS:.0f}ms"
         )
 
-    annotated = [
-        {**d, "id": f"{frame_id[:8]}-{i}", "timestamp": timestamp}
-        for i, d in enumerate(detections)
-    ]
+    annotated = []
+    for i, d in enumerate(detections):
+        lat, lng = random_coord()  # drone position at the moment of this detection
+        annotated.append({**d, "id": f"{frame_id[:8]}-{i}", "timestamp": timestamp, "lat": lat, "lng": lng})
 
     add_detections(annotated, inference_ms)
 

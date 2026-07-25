@@ -9,8 +9,9 @@ import Login from './screens/Login'
 import Register from './screens/Register'
 import Dashboard from './screens/Dashboard'
 import DamageMap from './screens/DamageMap'
-import CoordinationPanel from './screens/CoordinationPanel'
-import EvaluationReport from './screens/EvaluationReport'
+import IncidentConsole from './screens/IncidentConsole'
+import Responders from './screens/Responders'
+import IncidentHistory from './screens/IncidentHistory'
 import SystemAdminDashboard from './screens/SystemAdminDashboard'
 import AgencyAdminDashboard from './screens/AgencyAdminDashboard'
 
@@ -31,10 +32,11 @@ function AnimatedRoutes() {
         <Route path="/register" element={<PageTransition><Register /></PageTransition>} />
 
         <Route element={<ProtectedRoute allowedRoles={OPERATIONAL_ROLES} />}>
-          <Route path="/dashboard"    element={<PageTransition><Dashboard /></PageTransition>} />
-          <Route path="/map"          element={<PageTransition><DamageMap /></PageTransition>} />
-          <Route path="/coordination" element={<PageTransition><CoordinationPanel /></PageTransition>} />
-          <Route path="/evaluation"   element={<PageTransition><EvaluationReport /></PageTransition>} />
+          <Route path="/dashboard"  element={<PageTransition><Dashboard /></PageTransition>} />
+          <Route path="/map"        element={<PageTransition><DamageMap /></PageTransition>} />
+          <Route path="/incidents"  element={<PageTransition><IncidentConsole /></PageTransition>} />
+          <Route path="/responders" element={<PageTransition><Responders /></PageTransition>} />
+          <Route path="/history"    element={<PageTransition><IncidentHistory /></PageTransition>} />
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['system_admin']} />}>

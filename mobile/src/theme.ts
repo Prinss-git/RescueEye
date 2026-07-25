@@ -9,12 +9,19 @@ export const colors = {
   border:      '#e2e8f0',
   borderCyan:  '#a5f3fc',
 
+  // Primary brand — matches the web redesign (frontend logo navy).
+  navy:        '#0b2a4a',
+  navyDim:     '#0e3663',
+  navyDeep:    '#061829',
+  navyTint:    'rgba(11,42,74,0.06)',
+
   cyan:        '#0e7490',
   cyanDim:     '#155e75',
   alert:       '#dc2626',
   amber:       '#d97706',
   yellow:      '#ca8a04',
   green:       '#16a34a',
+  emerald:     '#059669',
   orange:      '#ea580c',
   orangeAlt:   '#f97316',
 
@@ -44,9 +51,10 @@ export const spacing = {
 
 export const radius = {
   sm: 6,
-  md: 8,
-  lg: 10,
-  pill: 20,
+  md: 10,
+  lg: 14,
+  xl: 20,
+  pill: 999,
 }
 
 // Role labels/colors for the 4 RescueEye account roles.

@@ -35,6 +35,39 @@ const users = [];
 
 const missions = [];
 
+// Simulated drone fleet. In this build the platform runs a single feed drone;
+// its identity is stamped onto every AI-detected incident so the Damage Map
+// can show "spotted by <callsign>" at the exact point the casualty was found.
+const drones = [
+  { id: 'DRN-01', callsign: 'Rescue-1', status: 'ACTIVE', lastLat: null, lastLng: null, lastFeedAt: null },
+];
+
+// Cebu City area-of-interest bounds — matches the api's simulated GPS box,
+// used to scatter AI incidents that arrive without an explicit coordinate.
+const AOI = { latMin: 10.28, latMax: 10.35, lngMin: 123.87, lngMax: 123.92 };
+
+function randomAoiCoord() {
+  return {
+    lat: +(AOI.latMin + Math.random() * (AOI.latMax - AOI.latMin)).toFixed(6),
+    lng: +(AOI.lngMin + Math.random() * (AOI.lngMax - AOI.lngMin)).toFixed(6),
+  };
+}
+
+function getDrones()      { return drones; }
+function getDroneById(id) { return drones.find(d => d.id === id) || null; }
+function getDefaultDrone() { return drones[0] || null; }
+
+// Records where the drone last operated — its position at the moment it
+// spotted the most recent casualty.
+function updateDronePosition(id, lat, lng) {
+  const drone = drones.find(d => d.id === id) || drones[0];
+  if (!drone) return null;
+  drone.lastLat = lat;
+  drone.lastLng = lng;
+  drone.lastFeedAt = new Date().toISOString();
+  return drone;
+}
+
 // Active drill session (null if no drill running)
 let activeDrill = null;
 let drillInterval = null;
@@ -179,6 +212,8 @@ function createIncident(data) {
     lng:           data.lng           || 0,
     description:   data.description   || '',
     reportedBy:    data.reportedBy    || 'AI_SYSTEM',
+    droneId:       data.droneId       || null,
+    droneCallsign: data.droneCallsign || null,
     assignedTeam:  null,
     isDrill:       data.isDrill       || false,
     drillSessionId: data.drillSessionId || null,
@@ -636,16 +671,22 @@ function startDrill(userId) {
     if (!activeDrill) return;
     const type = DRILL_INCIDENT_TYPES[Math.floor(Math.random() * DRILL_INCIDENT_TYPES.length)];
     const coord = DRILL_COORDS[Math.floor(Math.random() * DRILL_COORDS.length)];
+    const drone = getDefaultDrone();
+    const dLat = coord.lat + (Math.random() - 0.5) * 0.01;
+    const dLng = coord.lng + (Math.random() - 0.5) * 0.01;
     createIncident({
       type,
       severity:      Math.random() > 0.5 ? 'HIGH' : 'MEDIUM',
-      lat:           coord.lat + (Math.random() - 0.5) * 0.01,
-      lng:           coord.lng + (Math.random() - 0.5) * 0.01,
+      lat:           dLat,
+      lng:           dLng,
       description:   `[SIMULATED] ${type.replace('_', ' ')} — drill exercise`,
       reportedBy:    'DRILL_SYSTEM',
+      droneId:       drone ? drone.id : null,
+      droneCallsign: drone ? drone.callsign : null,
       isDrill:       true,
       drillSessionId: activeDrill.id,
     });
+    if (drone) updateDronePosition(drone.id, dLat, dLng);
     activeDrill.incidentCount += 1;
   }, 30000);
   return activeDrill;
@@ -850,6 +891,11 @@ module.exports = {
   resolveIncident,
   verifyIncident,
   findNearestFieldResponder,
+  getDrones,
+  getDroneById,
+  getDefaultDrone,
+  updateDronePosition,
+  randomAoiCoord,
   getMessages,
   addMessage,
   getAgencies,

@@ -27,24 +27,49 @@ router.get('/:id', (req, res) => {
 
 // POST /incidents
 router.post('/', (req, res) => {
-  const { type, severity, lat, lng, description, reportedBy } = req.body;
+  const { type, severity, lat, lng, description, reportedBy, droneId, droneCallsign } = req.body;
   if (!type || !VALID_TYPES.includes(type)) {
     return res.status(400).json({ error: `type must be one of: ${VALID_TYPES.join(', ')}` });
   }
   if (severity && !VALID_SEVERITIES.includes(severity)) {
     return res.status(400).json({ error: `severity must be one of: ${VALID_SEVERITIES.join(', ')}` });
   }
+
+  const source = reportedBy || 'AI_SYSTEM';
+  const isAI = source === 'AI_SYSTEM';
+
+  // AI detections are spotted by a drone — resolve which one, defaulting to
+  // the platform's single feed drone.
+  let drone = droneId ? store.getDroneById(droneId) : null;
+  if (!drone && isAI) drone = store.getDefaultDrone();
+
+  // The casualty is directly below where the drone spotted it, so the
+  // incident's location is the drone's position at detection time. If an AI
+  // detection arrives with no coordinate, scatter it across the AOI rather
+  // than piling every incident onto one hardcoded point.
+  let coordLat = lat, coordLng = lng;
+  if (coordLat == null || coordLng == null) {
+    if (isAI) { const c = store.randomAoiCoord(); coordLat = c.lat; coordLng = c.lng; }
+    else      { coordLat = 10.3157; coordLng = 123.8854; }
+  }
+
   const drill = store.getActiveDrill();
   const incident = store.createIncident({
     type,
     severity:      severity || 'MEDIUM',
-    lat:           lat   ?? 10.3157,
-    lng:           lng   ?? 123.8854,
+    lat:           coordLat,
+    lng:           coordLng,
     description:   description || '',
-    reportedBy:    reportedBy || 'AI_SYSTEM',
+    reportedBy:    source,
+    droneId:       drone ? drone.id : null,
+    droneCallsign: droneCallsign || (drone ? drone.callsign : null),
     isDrill:       !!drill,
     drillSessionId: drill?.id || null,
   });
+
+  // Record where the drone last operated.
+  if (drone) store.updateDronePosition(drone.id, coordLat, coordLng);
+
   store.incrementDrillCounter('incidentCount');
   res.status(201).json(incident);
 });

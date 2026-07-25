@@ -37,9 +37,21 @@ def _random_cebu_coord() -> tuple[float, float]:
     return lat, lng
 
 
+# Public helper so the detect handler can stamp a coordinate onto a detection
+# BEFORE storing/bridging, ensuring the map, the recent-detections feed, and
+# the created incident all agree on where the drone spotted the casualty.
+def random_coord() -> tuple[float, float]:
+    return _random_cebu_coord()
+
+
 def add_detections(detections: list[dict], inference_time_ms: float) -> None:
     for det in detections:
-        lat, lng = _random_cebu_coord()
+        # Reuse the coordinate already assigned to the detection (so the
+        # incident lands at the same spot), falling back to a fresh one.
+        if det.get("lat") is not None and det.get("lng") is not None:
+            lat, lng = det["lat"], det["lng"]
+        else:
+            lat, lng = _random_cebu_coord()
         _store.append(
             StoredDetection(
                 id=det.get("id", ""),

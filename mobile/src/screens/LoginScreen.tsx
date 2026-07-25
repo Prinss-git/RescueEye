@@ -1,23 +1,11 @@
 import { useState } from 'react'
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '../context/AuthContext'
-import { colors, font, radius, spacing } from '../theme'
-
-function Emblem() {
-  return (
-    <View style={s.emblemOuter}>
-      <View style={s.emblemInner} />
-      <View style={[s.tick, s.tickTop]} />
-      <View style={[s.tick, s.tickBottom]} />
-      <View style={[s.tick, s.tickLeft]} />
-      <View style={[s.tick, s.tickRight]} />
-      <Text style={s.emblemText}>RE</Text>
-    </View>
-  )
-}
+import { colors, radius, spacing } from '../theme'
 
 export default function LoginScreen() {
   const { login } = useAuth()
@@ -36,69 +24,69 @@ export default function LoginScreen() {
     try {
       await login(email, password)
     } catch {
-      setError('Invalid credentials. Try commander@rescueeye.ph / password123')
+      setError('Invalid credentials. Check your email and password.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <KeyboardAvoidingView
-      style={s.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={s.content}
-        keyboardShouldPersistTaps="handled">
-
-        <View style={s.logoBlock}>
-          <Emblem />
-          <Text style={s.title}>RESCUEEYE</Text>
-          <Text style={s.subtitle}>AI-ASSISTED COMMAND CENTER</Text>
+    <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Navy brand header */}
+      <View style={s.hero}>
+        <View style={s.logoTile}>
+          <Image source={require('../../assets/logo-mark.jpg')} style={{ width: 52, height: 52 }} resizeMode="contain" />
         </View>
+        <Text style={s.brand}>RescueEye</Text>
+        <Text style={s.tagline}>Field Responder</Text>
+      </View>
 
+      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <View style={s.card}>
+          <Text style={s.cardTitle}>Sign in to respond</Text>
+
           <View style={s.field}>
-            <Text style={s.label}>EMAIL</Text>
-            <TextInput
-              style={s.input}
-              placeholder="commander@rescueeye.ph"
-              placeholderTextColor={colors.textFaint}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              editable={!loading}
-            />
+            <Text style={s.label}>Email</Text>
+            <View style={s.inputWrap}>
+              <Ionicons name="mail-outline" size={16} color={colors.textMuted} />
+              <TextInput
+                style={s.input}
+                placeholder="responder@agency.ph"
+                placeholderTextColor={colors.textFaint}
+                value={email} onChangeText={setEmail}
+                autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
+                editable={!loading}
+              />
+            </View>
           </View>
 
           <View style={s.field}>
-            <Text style={s.label}>PASSWORD</Text>
-            <TextInput
-              style={s.input}
-              placeholder="••••••••"
-              placeholderTextColor={colors.textFaint}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              editable={!loading}
-            />
+            <Text style={s.label}>Password</Text>
+            <View style={s.inputWrap}>
+              <Ionicons name="lock-closed-outline" size={16} color={colors.textMuted} />
+              <TextInput
+                style={s.input}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textFaint}
+                value={password} onChangeText={setPassword}
+                secureTextEntry editable={!loading}
+              />
+            </View>
           </View>
 
           {error ? (
             <View style={s.errorBox}>
+              <Ionicons name="alert-circle" size={15} color={colors.alert} />
               <Text style={s.errorText}>{error}</Text>
             </View>
           ) : null}
 
-          <TouchableOpacity
-            style={[s.submitBtn, loading && s.submitBtnDisabled]}
-            onPress={handleSubmit}
-            disabled={loading}>
-            {loading ? (
-              <ActivityIndicator color={colors.bg} />
-            ) : (
-              <Text style={s.submitText}>LOGIN</Text>
+          <TouchableOpacity style={[s.submitBtn, loading && s.submitBtnDisabled]} onPress={handleSubmit} disabled={loading} activeOpacity={0.85}>
+            {loading ? <ActivityIndicator color="#fff" /> : (
+              <>
+                <Text style={s.submitText}>Sign In</Text>
+                <Ionicons name="arrow-forward" size={17} color="#fff" />
+              </>
             )}
           </TouchableOpacity>
         </View>
@@ -109,54 +97,47 @@ export default function LoginScreen() {
   )
 }
 
-const EMBLEM_SIZE = 80
-
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: colors.bg },
-  content: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xl },
 
-  logoBlock: { alignItems: 'center', gap: spacing.sm },
-  emblemOuter: {
-    width: EMBLEM_SIZE, height: EMBLEM_SIZE, borderRadius: EMBLEM_SIZE / 2,
-    borderWidth: 2, borderColor: colors.cyan, alignItems: 'center', justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
-  emblemInner: {
-    position: 'absolute', width: EMBLEM_SIZE - 16, height: EMBLEM_SIZE - 16,
-    borderRadius: (EMBLEM_SIZE - 16) / 2, borderWidth: 0.5, borderColor: 'rgba(0,212,255,0.4)',
-  },
-  tick: { position: 'absolute', backgroundColor: colors.cyan },
-  tickTop:    { top: -10, width: 2, height: 12 },
-  tickBottom: { bottom: -10, width: 2, height: 12 },
-  tickLeft:   { left: -10, width: 12, height: 2 },
-  tickRight:  { right: -10, width: 12, height: 2 },
-  emblemText: { fontFamily: font.mono, fontWeight: 'bold', fontSize: 14, color: colors.cyan },
+  hero:    { backgroundColor: colors.navy, alignItems: 'center', paddingTop: 72, paddingBottom: 40,
+             borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
+  logoTile: { width: 76, height: 76, borderRadius: 20, backgroundColor: '#fff',
+              alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md,
+              shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
+  brand:   { fontSize: 26, fontWeight: '800', color: '#ffffff', letterSpacing: 0.3 },
+  tagline: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.6)', letterSpacing: 2, marginTop: 4, textTransform: 'uppercase' },
 
-  title:    { fontFamily: font.mono, fontWeight: 'bold', fontSize: 20, color: colors.cyan, letterSpacing: 4 },
-  subtitle: { fontFamily: font.mono, fontSize: 11, color: colors.textMuted, letterSpacing: 2 },
-
+  content: { padding: spacing.xl, gap: spacing.lg },
   card: {
-    width: '100%', maxWidth: 360, backgroundColor: colors.panel, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: 'rgba(0,212,255,0.15)', padding: spacing.xl, gap: spacing.lg,
+    marginTop: -24, backgroundColor: colors.panel, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.xl, gap: spacing.lg,
+    shadowColor: '#0f172a', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 3,
   },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
+
   field: { gap: spacing.xs },
-  label: { fontFamily: font.mono, fontSize: 10, color: colors.textSecondary, letterSpacing: 2 },
-  input: {
-    fontFamily: font.mono, fontSize: 13, color: colors.textPrimary,
-    backgroundColor: colors.panelLight, borderRadius: radius.sm, borderWidth: 1,
-    borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: 10,
+  label: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  inputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.panelLight, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.md,
   },
+  input: { flex: 1, fontSize: 14, color: colors.textPrimary, paddingVertical: 12 },
+
   errorBox: {
-    borderWidth: 1, borderColor: 'rgba(255,59,59,0.3)', backgroundColor: 'rgba(255,59,59,0.1)',
-    borderRadius: radius.sm, padding: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderColor: 'rgba(220,38,38,0.25)', backgroundColor: 'rgba(220,38,38,0.06)',
+    borderRadius: radius.md, padding: spacing.md,
   },
-  errorText: { fontFamily: font.mono, fontSize: 11, color: colors.alert },
+  errorText: { flex: 1, fontSize: 12, color: colors.alert },
+
   submitBtn: {
-    marginTop: spacing.xs, backgroundColor: colors.cyan, borderRadius: radius.sm,
-    paddingVertical: 12, alignItems: 'center', justifyContent: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    marginTop: spacing.xs, backgroundColor: colors.navy, borderRadius: radius.md, paddingVertical: 15,
   },
   submitBtnDisabled: { opacity: 0.6 },
-  submitText: { fontFamily: font.mono, fontWeight: 'bold', fontSize: 13, color: colors.bg, letterSpacing: 2 },
+  submitText: { fontWeight: '700', fontSize: 15, color: '#ffffff', letterSpacing: 0.3 },
 
-  footer: { fontFamily: font.mono, fontSize: 10, color: colors.textFaint, textAlign: 'center' },
+  footer: { fontSize: 11, color: colors.textFaint, textAlign: 'center', marginTop: spacing.md },
 })

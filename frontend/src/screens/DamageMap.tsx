@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { MapContainer, TileLayer, Popup, CircleMarker, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Popup, CircleMarker, Marker, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { Crosshair } from 'lucide-react'
@@ -22,15 +22,17 @@ interface Incident {
   timestamp:  string
   confidence: number
   source:     'static' | 'live'
+  drone?:     string | null
 }
 
 interface VerifiedIncident {
-  id:          string
-  type:        'VICTIM_DETECTED' | 'FLOOD' | 'FIRE' | 'STRUCTURAL' | 'UNKNOWN'
-  description: string
-  lat:         number
-  lng:         number
-  createdAt:   string
+  id:            string
+  type:          'VICTIM_DETECTED' | 'FLOOD' | 'FIRE' | 'STRUCTURAL' | 'UNKNOWN'
+  description:   string
+  lat:           number
+  lng:           number
+  createdAt:     string
+  droneCallsign: string | null
 }
 
 const STATIC_INCIDENTS: Incident[] = [
@@ -86,7 +88,7 @@ function RecenterButton() {
   )
 }
 
-// Pulsing ring for victim markers (CSS keyframe injected once)
+// Pulsing ring for victim markers + drone-spotted marker (injected once)
 const PULSE_STYLE = `
 @keyframes markerPulse {
   0%   { r: 10; opacity: 0.8; }
@@ -94,6 +96,22 @@ const PULSE_STYLE = `
   100% { r: 22; opacity: 0; }
 }
 .victim-pulse circle { animation: markerPulse 1.5s ease-out infinite; }
+
+.re-drone-marker { background: transparent !important; border: none !important; }
+.re-drone-wrap { position: relative; width: 36px; height: 36px; }
+.re-drone-ring {
+  position: absolute; inset: 0; border-radius: 9999px; border: 2px solid;
+  animation: droneRing 1.8s ease-out infinite;
+}
+.re-drone-disc {
+  position: absolute; inset: 7px; border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+@keyframes droneRing {
+  0%   { transform: scale(0.7); opacity: 0.7; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
 `
 
 function injectPulseStyle() {
@@ -102,6 +120,31 @@ function injectPulseStyle() {
   style.id = 'victim-pulse-style'
   style.textContent = PULSE_STYLE
   document.head.appendChild(style)
+}
+
+// A drone-spotted casualty marker: a colored disc with a quadcopter glyph and
+// a pulsing detection ring — marks the drone's position where the casualty
+// was found.
+function droneIcon(color: string) {
+  return L.divIcon({
+    className: 're-drone-marker',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -16],
+    html: `
+      <div class="re-drone-wrap">
+        <span class="re-drone-ring" style="border-color:${color}"></span>
+        <span class="re-drone-disc" style="background:${color}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/>
+            <circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+            <path d="M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5"/>
+            <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
+          </svg>
+        </span>
+      </div>`,
+  })
 }
 
 export default function DamageMap() {
@@ -136,6 +179,7 @@ export default function DamageMap() {
           timestamp:  new Date(inc.createdAt).toLocaleTimeString('en-PH', { hour12: false }),
           confidence: 1,
           source:     'live',
+          drone:      inc.droneCallsign,
         })))
       } catch {
         setPollError(true)
@@ -206,30 +250,52 @@ export default function DamageMap() {
             {visible.map((inc) => {
               const color  = TYPE_COLOR[inc.type]
               const isLive = inc.source === 'live'
+
+              const popup = (
+                <Popup>
+                  <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                    <strong>{inc.id}</strong><br />
+                    {inc.label}<br />
+                    {isLive && inc.drone && (
+                      <span style={{ color: '#0e7490' }}>◈ Spotted by {inc.drone}<br /></span>
+                    )}
+                    <span style={{ color: '#888' }}>
+                      {inc.lat.toFixed(4)}, {inc.lng.toFixed(4)} · {inc.timestamp}
+                    </span>
+                    {isLive && <span style={{ color: '#0e7490' }}> · VERIFIED</span>}
+                  </div>
+                </Popup>
+              )
+
+              // Live, verified, drone-spotted casualties get the drone marker —
+              // it marks the drone's position where the casualty was found.
+              if (isLive) {
+                return (
+                  <Marker
+                    key={inc.id}
+                    position={[inc.lat, inc.lng]}
+                    icon={droneIcon(color)}
+                    eventHandlers={{ click: () => setSelected(inc) }}
+                  >
+                    {popup}
+                  </Marker>
+                )
+              }
+
+              // Static seed incidents keep the plain circle marker.
               const isVictim = inc.type === 'victim_detected'
               return (
                 <CircleMarker
                   key={inc.id}
                   center={[inc.lat, inc.lng]}
-                  radius={isLive ? 10 : 13}
+                  radius={13}
                   pathOptions={{
-                    color,
-                    fillColor: color,
-                    fillOpacity: isLive ? 0.55 : 0.72,
-                    weight:      isLive ? 1 : 2,
-                    dashArray:   isLive ? '4 2' : undefined,
-                    className:   isVictim ? 'victim-pulse' : undefined,
+                    color, fillColor: color, fillOpacity: 0.72, weight: 2,
+                    className: isVictim ? 'victim-pulse' : undefined,
                   }}
                   eventHandlers={{ click: () => setSelected(inc) }}
                 >
-                  <Popup>
-                    <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                      <strong>{inc.id}</strong><br />
-                      {inc.label}<br />
-                      <span style={{ color: '#888' }}>{inc.timestamp}</span>
-                      {isLive && <span style={{ color: '#0e7490' }}> · LIVE</span>}
-                    </div>
-                  </Popup>
+                  {popup}
                 </CircleMarker>
               )
             })}
@@ -261,8 +327,8 @@ export default function DamageMap() {
               </div>
             ))}
             <div className="border-t border-slate-900/10 pt-2 mt-1 flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full border border-dashed border-accent flex-shrink-0" />
-              <span className="font-mono text-xs text-slate-900/40">Dashed = live detection</span>
+              <span className="w-3 h-3 rounded-full ring-2 ring-accent/40 flex-shrink-0" style={{ background: '#0e7490' }} />
+              <span className="font-mono text-xs text-slate-900/40">◈ = drone-spotted (verified)</span>
             </div>
           </div>
         </div>
@@ -325,10 +391,12 @@ export default function DamageMap() {
             <div className="space-y-1">
               {[
                 ['TYPE',   TYPE_LABEL[selected.type].toUpperCase(), TYPE_COLOR[selected.type]],
-                ['CONF',   `${Math.round(selected.confidence * 100)}%`, '#1e293b'],
+                ...(selected.source === 'live' && selected.drone
+                  ? [['DRONE', selected.drone, '#0e7490'] as [string, string, string]]
+                  : [['CONF', `${Math.round(selected.confidence * 100)}%`, '#1e293b'] as [string, string, string]]),
                 ['COORDS', `${selected.lat.toFixed(4)}, ${selected.lng.toFixed(4)}`, '#64748b'],
                 ['TIME',   selected.timestamp, '#1e293b'],
-                ['SOURCE', selected.source.toUpperCase(), selected.source === 'live' ? '#0e7490' : '#94a3b8'],
+                ['SOURCE', selected.source === 'live' ? 'DRONE-SPOTTED' : 'STATIC', selected.source === 'live' ? '#0e7490' : '#94a3b8'],
               ].map(([label, value, color]) => (
                 <div key={label} className="flex justify-between">
                   <span className="font-mono text-xs text-slate-900/40">{label}</span>
@@ -337,10 +405,10 @@ export default function DamageMap() {
               ))}
             </div>
             <a
-              href="/coordination"
+              href="/incidents"
               className="btn-primary w-full text-xs mt-3 block text-center"
             >
-              Dispatch Team →
+              Open Incident Console →
             </a>
           </div>
         )}

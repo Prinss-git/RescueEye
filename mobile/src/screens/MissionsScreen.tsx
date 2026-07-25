@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 import * as Location from 'expo-location'
+import { Ionicons } from '@expo/vector-icons'
 import { useNavigation } from '@react-navigation/native'
 import { SERVER_BASE } from '../config'
 import { useAuth } from '../context/AuthContext'
@@ -36,32 +37,25 @@ interface Incident {
   lng: number
 }
 
+type IoniconName = keyof typeof Ionicons.glyphMap
+
 const STATUS_LABEL: Record<string, string> = {
-  ASSIGNED:  'New Dispatch',
-  ACCEPTED:  'Accepted',
-  DECLINED:  'Declined',
-  EN_ROUTE:  'En Route',
-  ON_SITE:   'On Site',
-  TREATING:  'Treating Patient',
-  COMPLETED: 'Completed',
+  ASSIGNED: 'New Dispatch', ACCEPTED: 'Accepted', DECLINED: 'Declined',
+  EN_ROUTE: 'En Route', ON_SITE: 'On Site', TREATING: 'Treating', COMPLETED: 'Completed',
 }
-
 const STATUS_COLOR: Record<string, string> = {
-  ASSIGNED:  colors.alert,
-  ACCEPTED:  colors.cyan,
-  DECLINED:  colors.textMuted,
-  EN_ROUTE:  colors.amber,
-  ON_SITE:   colors.amber,
-  TREATING:  colors.orange,
-  COMPLETED: colors.green,
+  ASSIGNED: colors.alert, ACCEPTED: colors.cyan, DECLINED: colors.textMuted,
+  EN_ROUTE: colors.amber, ON_SITE: colors.emerald, TREATING: colors.orange, COMPLETED: colors.green,
 }
-
 const TYPE_LABEL: Record<string, string> = {
-  VICTIM_DETECTED: 'Victim Detected',
-  FLOOD:           'Flood Damage',
-  FIRE:            'Fire Damage',
-  STRUCTURAL:      'Structural Damage',
-  UNKNOWN:         'Unknown',
+  VICTIM_DETECTED: 'Victim Detected', FLOOD: 'Flood Damage', FIRE: 'Fire Damage',
+  STRUCTURAL: 'Structural Damage', UNKNOWN: 'Unknown Incident',
+}
+const TYPE_ICON: Record<string, IoniconName> = {
+  VICTIM_DETECTED: 'body', FLOOD: 'water', FIRE: 'flame', STRUCTURAL: 'business', UNKNOWN: 'help-circle',
+}
+const SEVERITY_COLOR: Record<string, string> = {
+  CRITICAL: colors.alert, HIGH: colors.orange, MEDIUM: colors.amber, LOW: colors.textMuted,
 }
 
 const TERMINAL = ['COMPLETED', 'DECLINED']
@@ -71,9 +65,8 @@ async function requestNotifPermission() {
   return status === 'granted'
 }
 
-// Lets verified incidents be auto-dispatched to whichever responder is
-// physically closest — reports this device's current position to the
-// server every LOCATION_REPORT_MS while a field responder is logged in.
+// Reports this device's position every LOCATION_REPORT_MS so verified
+// incidents can be auto-dispatched to the nearest responder.
 async function reportLocation(token: string | null) {
   if (!token) return
   try {
@@ -86,10 +79,7 @@ async function reportLocation(token: string | null) {
       body:    JSON.stringify({ lat: position.coords.latitude, lng: position.coords.longitude }),
       signal:  AbortSignal.timeout(5000),
     })
-  } catch {
-    // best-effort — a missed location ping just means this responder
-    // won't be considered for the next dispatch until the next tick
-  }
+  } catch {}
 }
 
 export default function MissionsScreen() {
@@ -102,8 +92,6 @@ export default function MissionsScreen() {
 
   useEffect(() => { requestNotifPermission() }, [])
 
-  // Tapping the OS notification banner jumps straight to the relevant
-  // mission's detail screen instead of just opening the app to this list.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const missionId = response.notification.request.content.data?.missionId
@@ -121,7 +109,6 @@ export default function MissionsScreen() {
 
   useEffect(() => {
     if (!user) return
-
     async function poll() {
       try {
         const [missionsRes, incidentsRes] = await Promise.all([
@@ -130,18 +117,14 @@ export default function MissionsScreen() {
         ])
         if (missionsRes.ok) {
           const data: Mission[] = await missionsRes.json()
-
           const newOnes = data.filter(m => !seenIds.current.has(m.id) && m.status === 'ASSIGNED')
           newOnes.forEach(m => seenIds.current.add(m.id))
           data.forEach(m => seenIds.current.add(m.id))
-
           if (newOnes.length > 0) {
             await Notifications.scheduleNotificationAsync({
               content: {
                 title: '🚨 New Mission Assigned',
-                body:  `${newOnes.length} new mission${newOnes.length > 1 ? 's' : ''} dispatched to your team`,
-                // Only a single new mission maps cleanly to a tap target —
-                // with several at once, tapping just opens this list instead.
+                body:  `${newOnes.length} new mission${newOnes.length > 1 ? 's' : ''} dispatched to you`,
                 data:  newOnes.length === 1 ? { missionId: newOnes[0].id } : undefined,
               },
               trigger: null,
@@ -155,11 +138,8 @@ export default function MissionsScreen() {
           list.forEach(i => { byId[i.id] = i })
           setIncidents(byId)
         }
-      } catch {} finally {
-        setLoading(false)
-      }
+      } catch {} finally { setLoading(false) }
     }
-
     poll()
     const t = setInterval(poll, 4000)
     return () => clearInterval(t)
@@ -169,46 +149,77 @@ export default function MissionsScreen() {
   const completed = missions.filter(m => TERMINAL.includes(m.status))
   const sections  = [...active, ...completed]
 
+  function renderCard(m: Mission) {
+    const incident = incidents[m.incidentId]
+    const statusColor = STATUS_COLOR[m.status] ?? colors.textMuted
+    const isNew = m.status === 'ASSIGNED'
+    const icon = incident ? (TYPE_ICON[incident.type] ?? 'help-circle') : 'help-circle'
+    const sev = incident ? SEVERITY_COLOR[incident.severity] ?? colors.textMuted : colors.textMuted
+    const done = TERMINAL.includes(m.status)
+
+    return (
+      <TouchableOpacity
+        style={[s.card, isNew && s.cardNew, done && s.cardDone]}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('MissionDetail', { missionId: m.id })}>
+        {isNew && (
+          <View style={s.newRibbon}>
+            <View style={s.newDot} />
+            <Text style={s.newRibbonText}>NEW DISPATCH · TAP TO RESPOND</Text>
+          </View>
+        )}
+        <View style={s.cardBody}>
+          <View style={[s.typeTile, { backgroundColor: sev + '18' }]}>
+            <Ionicons name={icon} size={20} color={sev} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={s.cardTop}>
+              <Text style={s.cardType} numberOfLines={1}>
+                {incident ? (TYPE_LABEL[incident.type] ?? incident.type) : 'Loading…'}
+              </Text>
+              <View style={[s.statusPill, { backgroundColor: statusColor + '18' }]}>
+                <Text style={[s.statusText, { color: statusColor }]}>{STATUS_LABEL[m.status] ?? m.status}</Text>
+              </View>
+            </View>
+            {incident?.description ? <Text style={s.cardDesc} numberOfLines={1}>{incident.description}</Text> : null}
+            <View style={s.cardMeta}>
+              {incident && <Text style={[s.sevText, { color: sev }]}>{incident.severity}</Text>}
+              <Text style={s.cardTime}>{new Date(m.createdAt).toLocaleTimeString('en-PH', { hour12: false })}</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+        </View>
+      </TouchableOpacity>
+    )
+  }
+
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <Text style={s.title}>MISSIONS</Text>
-        <Text style={s.sub}>{active.length} ACTIVE · {completed.length} COMPLETED</Text>
+      {/* Duty strip */}
+      <View style={s.duty}>
+        <View style={s.dutyLeft}>
+          <View style={s.dutyDot} />
+          <Text style={s.dutyText}>On duty · sharing location</Text>
+        </View>
+        <Text style={s.dutyCount}>{active.length} active</Text>
       </View>
 
-      {loading ? null : sections.length === 0 ? (
+      {loading ? (
+        <View style={s.center}><ActivityIndicator color={colors.navy} /></View>
+      ) : sections.length === 0 ? (
         <View style={s.empty}>
-          <Text style={s.emptyIcon}>◎</Text>
-          <Text style={s.emptyText}>NO MISSIONS ASSIGNED</Text>
-          <Text style={s.emptyHint}>You'll be notified the moment a mission is dispatched to your team</Text>
+          <View style={s.emptyTile}>
+            <Ionicons name="navigate-outline" size={30} color={colors.navy} />
+          </View>
+          <Text style={s.emptyText}>No missions right now</Text>
+          <Text style={s.emptyHint}>Stay on duty — you'll be notified the instant an incident is dispatched to you.</Text>
         </View>
       ) : (
         <FlatList
           data={sections}
           keyExtractor={m => m.id}
-          contentContainerStyle={{ padding: 12, gap: 8 }}
-          renderItem={({ item: m }) => {
-            const incident = incidents[m.incidentId]
-            const color = STATUS_COLOR[m.status] ?? colors.textMuted
-            return (
-              <TouchableOpacity
-                style={[s.card, { borderLeftColor: color }]}
-                onPress={() => navigation.navigate('MissionDetail', { missionId: m.id })}>
-                <View style={s.cardTop}>
-                  <Text style={s.cardType}>
-                    {incident ? (TYPE_LABEL[incident.type] ?? incident.type) : 'Loading…'}
-                  </Text>
-                  <Text style={[s.statusBadge, { color }]}>{STATUS_LABEL[m.status] ?? m.status}</Text>
-                </View>
-                {incident && (
-                  <Text style={s.cardDesc} numberOfLines={1}>{incident.description || 'No description'}</Text>
-                )}
-                <Text style={s.cardTime}>
-                  {new Date(m.createdAt).toLocaleTimeString('en-PH', { hour12: false })}
-                </Text>
-              </TouchableOpacity>
-            )
-          }}
+          contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.xl }}
+          renderItem={({ item }) => renderCard(item)}
         />
       )}
     </View>
@@ -216,20 +227,42 @@ export default function MissionsScreen() {
 }
 
 const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: colors.bg },
-  header:      { paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-                 borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.panel },
-  title:       { fontFamily: font.mono, fontSize: 13, fontWeight: 'bold', color: colors.textSecondary, letterSpacing: 2 },
-  sub:         { fontFamily: font.mono, fontSize: 9, color: colors.textMuted, marginTop: 2 },
-  empty:       { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingHorizontal: 32 },
-  emptyIcon:   { fontSize: 32, color: colors.textFaint },
-  emptyText:   { fontFamily: font.mono, fontSize: 11, color: colors.textFaint, letterSpacing: 2 },
-  emptyHint:   { fontFamily: font.mono, fontSize: 9, color: colors.textFaint, textAlign: 'center' },
-  card:        { backgroundColor: colors.panel, borderRadius: radius.md, padding: spacing.md, gap: 4,
-                 borderLeftWidth: 3, borderWidth: 1, borderColor: colors.border },
-  cardTop:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardType:    { fontFamily: font.mono, fontSize: 12, fontWeight: 'bold', color: colors.textPrimary },
-  statusBadge: { fontFamily: font.mono, fontSize: 9, fontWeight: 'bold' },
-  cardDesc:    { fontFamily: font.mono, fontSize: 10, color: colors.textSecondary },
-  cardTime:    { fontFamily: font.mono, fontSize: 9, color: colors.textMuted },
+  root:   { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  duty:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              paddingHorizontal: spacing.lg, paddingVertical: 10, backgroundColor: colors.panel,
+              borderBottomWidth: 1, borderBottomColor: colors.border },
+  dutyLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  dutyDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.emerald },
+  dutyText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  dutyCount:{ fontSize: 12, fontWeight: '700', color: colors.navy },
+
+  empty:     { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingHorizontal: 40 },
+  emptyTile: { width: 68, height: 68, borderRadius: 20, backgroundColor: colors.navyTint,
+               alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
+  emptyText: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  emptyHint: { fontSize: 12, color: colors.textMuted, textAlign: 'center', lineHeight: 18 },
+
+  card:     { backgroundColor: colors.panel, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
+              overflow: 'hidden' },
+  cardNew:  { borderColor: colors.alert + '55',
+              shadowColor: colors.alert, shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+  cardDone: { opacity: 0.6 },
+
+  newRibbon:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.alert,
+                   paddingHorizontal: spacing.md, paddingVertical: 5 },
+  newDot:        { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' },
+  newRibbonText: { fontSize: 10, fontWeight: '800', color: '#fff', letterSpacing: 0.8 },
+
+  cardBody: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md },
+  typeTile: { width: 42, height: 42, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  cardTop:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  cardType: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.textPrimary },
+  statusPill:{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
+  statusText:{ fontSize: 10, fontWeight: '700' },
+  cardDesc: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 4 },
+  sevText:  { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  cardTime: { fontFamily: font.mono, fontSize: 11, color: colors.textMuted },
 })
